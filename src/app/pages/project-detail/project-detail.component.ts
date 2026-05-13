@@ -31,6 +31,7 @@ import { UserMenuComponent } from '../../components/shared/user-menu/user-menu.c
 import { CreateEnvironmentModalComponent } from './create-environment-modal/create-environment-modal.component';
 import { Environment } from '../../models/environment.model';
 import {
+  EnvConfigEntry,
   ProjectTypeInfo,
   TauriBridgeService,
   TestsBranchStatus,
@@ -41,6 +42,7 @@ import { ProjectsStore } from '../../services/state/projects.store';
 import { NotificationService } from '../../services/utils/notification.service';
 
 export type WorktreeStatus = 'unknown' | 'preparing' | 'ready' | 'failed';
+export type SyncStatus = 'idle' | 'syncing' | 'error';
 
 type BranchPhase =
   | { kind: 'checking' }
@@ -104,8 +106,14 @@ export class ProjectDetailComponent {
   readonly branchPhase = signal<BranchPhase>({ kind: 'checking' });
   readonly worktreeStatuses = signal<Record<string, WorktreeStatus>>({});
   readonly projectInfo = signal<ProjectTypeInfo | null>(null);
+  readonly syncStatus = signal<SyncStatus>('idle');
+  readonly lastSyncedAt = signal<number | null>(null);
+  readonly syncError = signal<string | null>(null);
 
   readonly isTestsBranchReady = computed(() => this.branchPhase().kind === 'ready');
+
+  private pushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pulledProjects = new Set<string>();
 
   worktreeStatusFor(envId: string): WorktreeStatus {
     return this.worktreeStatuses()[envId] ?? 'unknown';
@@ -135,6 +143,16 @@ export class ProjectDetailComponent {
           }
         }
       }
+    });
+
+    // Pull env config from tests branch once the branch is ready.
+    effect(() => {
+      const p = this.project();
+      if (!p) return;
+      if (!this.isTestsBranchReady()) return;
+      if (this.pulledProjects.has(p.id)) return;
+      this.pulledProjects.add(p.id);
+      void this.pullEnvConfig();
     });
   }
 
@@ -181,6 +199,7 @@ export class ProjectDetailComponent {
       const info = await this.tauri.createEnvWorktree(
         p.localPath,
         env.id,
+        env.name,
         env.codeBranch,
         this.auth.token() ?? undefined,
       );
@@ -212,9 +231,9 @@ export class ProjectDetailComponent {
   async deleteEnvironment(env: Environment): Promise<void> {
     const p = this.project();
     if (!p) return;
-    if (this.tauri.isTauri) {
+    if (this.tauri.isTauri && env.worktreePath) {
       try {
-        await this.tauri.removeEnvWorktree(p.localPath, env.id);
+        await this.tauri.removeEnvWorktree(p.localPath, env.worktreePath);
       } catch {
         // Best-effort: even if worktree removal fails, drop from the store.
       }
@@ -225,6 +244,108 @@ export class ProjectDetailComponent {
       delete next[env.id];
       return next;
     });
+    this.schedulePush();
+  }
+
+  private async pullEnvConfig(): Promise<void> {
+    const p = this.project();
+    if (!p || !this.tauri.isTauri) return;
+
+    this.syncStatus.set('syncing');
+    try {
+      const result = await this.tauri.readEnvConfig(
+        p.localPath,
+        this.auth.token() ?? undefined,
+      );
+
+      const remoteEnvs = result.config.environments;
+      const localEnvs = this.environments();
+      const isFirstSync = this.lastSyncedAt() === null;
+
+      const remoteIds = new Set(remoteEnvs.map((e) => e.id));
+      const merged: Environment[] = [];
+
+      for (const remote of remoteEnvs) {
+        const local = localEnvs.find((e) => e.id === remote.id);
+        merged.push({
+          id: remote.id,
+          name: remote.name,
+          deployedUrl: remote.deployedUrl,
+          codeBranch: remote.codeBranch,
+          color: remote.color as Environment['color'],
+          worktreePath: local?.worktreePath,
+        });
+      }
+
+      // First-time migration: if remote was empty and we have local envs,
+      // keep them and push them up. After first sync, remote is authoritative.
+      let needsMigrationPush = false;
+      if (isFirstSync && remoteEnvs.length === 0 && localEnvs.length > 0) {
+        for (const local of localEnvs) {
+          merged.push(local);
+        }
+        needsMigrationPush = true;
+      }
+
+      this.envs.replaceEnvironments(p.id, merged);
+      this.lastSyncedAt.set(Date.now());
+      this.syncStatus.set('idle');
+      this.syncError.set(null);
+
+      if (needsMigrationPush) {
+        this.schedulePush(true);
+      }
+    } catch (err) {
+      this.syncStatus.set('error');
+      this.syncError.set(this.formatError(err));
+    }
+  }
+
+  private schedulePush(immediate = false): void {
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+    }
+    const delay = immediate ? 0 : 800;
+    this.pushTimer = setTimeout(() => {
+      this.pushTimer = null;
+      void this.pushEnvConfig();
+    }, delay);
+  }
+
+  private async pushEnvConfig(): Promise<void> {
+    const p = this.project();
+    if (!p || !this.tauri.isTauri) return;
+
+    this.syncStatus.set('syncing');
+    try {
+      const entries: EnvConfigEntry[] = this.environments().map((e) => ({
+        id: e.id,
+        name: e.name,
+        deployedUrl: e.deployedUrl,
+        codeBranch: e.codeBranch,
+        color: e.color,
+      }));
+      await this.tauri.writeEnvConfig(
+        p.localPath,
+        entries,
+        this.auth.token() ?? undefined,
+      );
+      this.lastSyncedAt.set(Date.now());
+      this.syncStatus.set('idle');
+      this.syncError.set(null);
+    } catch (err) {
+      this.syncStatus.set('error');
+      this.syncError.set(this.formatError(err));
+    }
+  }
+
+  async syncNow(): Promise<void> {
+    if (this.pushTimer) {
+      clearTimeout(this.pushTimer);
+      this.pushTimer = null;
+    }
+    await this.pullEnvConfig();
+    await this.pushEnvConfig();
   }
 
   async checkTestsBranch(): Promise<void> {
@@ -321,11 +442,36 @@ export class ProjectDetailComponent {
     this.envs.addEnvironment(this.id(), env);
     this.isCreateModalOpen.set(false);
     this.notify.success(`${env.name} environment created`);
+    this.schedulePush();
+  }
+
+  syncBadgeText(): string {
+    if (this.syncStatus() === 'syncing') return 'Syncing…';
+    if (this.syncStatus() === 'error') return 'Sync failed';
+    const ts = this.lastSyncedAt();
+    if (!ts) return 'Not synced';
+    const seconds = Math.floor((Date.now() - ts) / 1000);
+    if (seconds < 10) return 'Synced just now';
+    if (seconds < 60) return `Synced ${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `Synced ${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `Synced ${hours}h ago`;
   }
 
   openEnvironment(env: Environment): void {
+    if (this.worktreeStatusFor(env.id) !== 'ready') {
+      this.notify.info('Workspace is still preparing — try again in a moment.');
+      return;
+    }
     this.envs.selectEnvironment(env.id);
-    this.notify.info('Workspace coming soon');
+    void this.router.navigate([
+      '/projects',
+      this.id(),
+      'env',
+      env.id,
+      'workspace',
+    ]);
   }
 
   goBack(): void {

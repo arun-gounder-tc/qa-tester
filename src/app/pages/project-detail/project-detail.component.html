@@ -107,8 +107,8 @@
       }
 
       <section>
-        <div class="flex items-center justify-between mb-4">
-          <div>
+        <div class="flex items-center justify-between mb-4 gap-3">
+          <div class="min-w-0">
             <h2 class="text-base font-semibold text-content tracking-tight">
               Environments
             </h2>
@@ -120,17 +120,51 @@
               }
             </p>
           </div>
-          @if (hasEnvironments()) {
-            <app-button
-              variant="primary"
-              size="sm"
-              [disabled]="!isTestsBranchReady()"
-              (clicked)="openCreateModal()"
-            >
-              <lucide-icon [img]="PlusIcon" [size]="13"></lucide-icon>
-              New Environment
-            </app-button>
-          }
+          <div class="flex items-center gap-2 shrink-0">
+            @if (isTestsBranchReady()) {
+              @switch (syncStatus()) {
+                @case ('syncing') {
+                  <span class="inline-flex items-center gap-1.5 text-xs text-content-muted">
+                    <lucide-icon [img]="LoaderIcon" [size]="11" class="animate-spin"></lucide-icon>
+                    Syncing…
+                  </span>
+                }
+                @case ('error') {
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1.5 text-xs text-danger hover:underline"
+                    (click)="syncNow()"
+                    [title]="syncError() ?? ''"
+                  >
+                    <lucide-icon [img]="WarnIcon" [size]="11"></lucide-icon>
+                    Sync failed — retry
+                  </button>
+                }
+                @default {
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1.5 text-xs text-content-muted hover:text-content transition-colors"
+                    (click)="syncNow()"
+                    title="Sync now"
+                  >
+                    <lucide-icon [img]="RetryIcon" [size]="11"></lucide-icon>
+                    {{ syncBadgeText() }}
+                  </button>
+                }
+              }
+            }
+            @if (hasEnvironments()) {
+              <app-button
+                variant="primary"
+                size="sm"
+                [disabled]="!isTestsBranchReady()"
+                (clicked)="openCreateModal()"
+              >
+                <lucide-icon [img]="PlusIcon" [size]="13"></lucide-icon>
+                New Environment
+              </app-button>
+            }
+          </div>
         </div>
 
         @if (!hasEnvironments()) {

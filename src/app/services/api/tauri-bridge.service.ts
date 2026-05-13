@@ -39,6 +39,46 @@ export interface ProjectTypeInfo {
   framework: string | null;
 }
 
+export interface EnvConfigEntry {
+  id: string;
+  name: string;
+  deployedUrl: string;
+  codeBranch: string;
+  color: string;
+}
+
+export interface EnvConfigFile {
+  version: number;
+  environments: EnvConfigEntry[];
+}
+
+export interface EnvSyncResult {
+  config: EnvConfigFile;
+  synced_at: string;
+}
+
+export interface TestFile {
+  path: string;
+  name: string;
+  relative_path: string;
+  directory: string;
+  size_bytes: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatEnvContext {
+  name: string;
+  deployedUrl: string;
+  codeBranch: string;
+  worktreePath: string | null;
+  projectType?: string | null;
+  framework?: string | null;
+}
+
 export interface DeviceCode {
   device_code: string;
   user_code: string;
@@ -113,6 +153,7 @@ export class TauriBridgeService {
   createEnvWorktree(
     repoPath: string,
     envId: string,
+    envName: string,
     branch: string,
     token?: string,
   ): Promise<WorktreeInfo> {
@@ -120,14 +161,15 @@ export class TauriBridgeService {
     return invoke<WorktreeInfo>('create_env_worktree', {
       repoPath,
       envId,
+      envName,
       branch,
       token: token ?? null,
     });
   }
 
-  removeEnvWorktree(repoPath: string, envId: string): Promise<void> {
+  removeEnvWorktree(repoPath: string, worktreePath: string): Promise<void> {
     this.assertTauri('remove_env_worktree');
-    return invoke<void>('remove_env_worktree', { repoPath, envId });
+    return invoke<void>('remove_env_worktree', { repoPath, worktreePath });
   }
 
   listWorktrees(repoPath: string): Promise<WorktreeListEntry[]> {
@@ -141,7 +183,62 @@ export class TauriBridgeService {
   }
 
   revealInFinder(path: string): Promise<void> {
-    return this.openExternal(path);
+    this.assertTauri('reveal_in_folder');
+    return invoke<void>('reveal_in_folder', { path });
+  }
+
+  // Env config sync (tests branch)
+  readEnvConfig(repoPath: string, token?: string): Promise<EnvSyncResult> {
+    this.assertTauri('read_env_config');
+    return invoke<EnvSyncResult>('read_env_config', {
+      repoPath,
+      token: token ?? null,
+    });
+  }
+
+  writeEnvConfig(
+    repoPath: string,
+    environments: EnvConfigEntry[],
+    token?: string,
+  ): Promise<EnvSyncResult> {
+    this.assertTauri('write_env_config');
+    return invoke<EnvSyncResult>('write_env_config', {
+      repoPath,
+      environments,
+      token: token ?? null,
+    });
+  }
+
+  // Tests files
+  listTestFiles(repoPath: string): Promise<TestFile[]> {
+    this.assertTauri('list_test_files');
+    return invoke<TestFile[]>('list_test_files', { repoPath });
+  }
+
+  readTestFile(repoPath: string, filePath: string): Promise<string> {
+    this.assertTauri('read_test_file');
+    return invoke<string>('read_test_file', { repoPath, filePath });
+  }
+
+  // Chat (Claude CLI)
+  chatAvailable(): Promise<boolean> {
+    if (!this.isTauri) return Promise.resolve(false);
+    return invoke<boolean>('chat_available');
+  }
+
+  chatSend(
+    repoPath: string,
+    envContext: ChatEnvContext | null,
+    history: ChatMessage[],
+    message: string,
+  ): Promise<string> {
+    this.assertTauri('chat_send');
+    return invoke<string>('chat_send', {
+      repoPath,
+      envContext,
+      history,
+      message,
+    });
   }
 
   // OAuth Device Flow

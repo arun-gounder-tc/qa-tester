@@ -2,7 +2,7 @@ import { Routes } from '@angular/router';
 import { authGuard } from './guards/auth.guard';
 
 export const routes: Routes = [
-  { path: '', redirectTo: 'login', pathMatch: 'full' },
+  { path: '', redirectTo: 'projects', pathMatch: 'full' },
   {
     path: 'login',
     loadComponent: () =>
@@ -22,6 +22,14 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./pages/project-detail/project-detail.component').then(
         (m) => m.ProjectDetailComponent,
+      ),
+  },
+  {
+    path: 'projects/:id/env/:envId/workspace',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./pages/workspace/workspace.component').then(
+        (m) => m.WorkspaceComponent,
       ),
   },
   { path: '**', redirectTo: 'login' },

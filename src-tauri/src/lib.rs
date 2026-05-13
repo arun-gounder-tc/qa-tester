@@ -1,5 +1,8 @@
+mod chat;
 mod commands;
+mod env_config;
 mod tests_branch;
+mod tests_files;
 mod worktrees;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -31,6 +34,13 @@ pub fn run() {
       worktrees::remove_env_worktree,
       worktrees::list_worktrees,
       worktrees::detect_project_type,
+      worktrees::reveal_in_folder,
+      env_config::read_env_config,
+      env_config::write_env_config,
+      tests_files::list_test_files,
+      tests_files::read_test_file,
+      chat::chat_available,
+      chat::chat_send,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

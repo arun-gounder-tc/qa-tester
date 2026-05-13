@@ -67,8 +67,42 @@ fn run_git_with_auth(
         .map_err(|e| format!("git not available: {}. Is git installed?", e))
 }
 
-fn worktree_path(repo_path: &str, env_id: &str) -> PathBuf {
-    Path::new(repo_path).join(WORKTREES_DIR).join(env_id)
+/// Produces a filesystem-safe slug from an arbitrary env name.
+/// Keeps lowercase alphanumerics + dashes; collapses everything else.
+fn slugify(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_dash = true;
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "env".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Builds a human-readable, collision-resistant folder name for an env's
+/// worktree: `<slug>-<short-id>`. Example: `development-5c257b`.
+fn worktree_folder_name(env_id: &str, env_name: &str) -> String {
+    let slug = slugify(env_name);
+    let short_id: String = env_id.chars().filter(|c| *c != '-').take(6).collect();
+    if short_id.is_empty() {
+        slug
+    } else {
+        format!("{}-{}", slug, short_id)
+    }
+}
+
+fn worktree_path(repo_path: &str, folder_name: &str) -> PathBuf {
+    Path::new(repo_path).join(WORKTREES_DIR).join(folder_name)
 }
 
 fn local_branch_exists(repo_path: &str, branch: &str) -> bool {
@@ -128,6 +162,7 @@ fn ensure_excluded(repo_path: &str) -> Result<(), String> {
 pub async fn create_env_worktree(
     repo_path: String,
     env_id: String,
+    env_name: String,
     branch: String,
     token: Option<String>,
 ) -> Result<WorktreeInfo, String> {
@@ -138,7 +173,8 @@ pub async fn create_env_worktree(
 
     ensure_excluded(&repo_path)?;
 
-    let path = worktree_path(&repo_path, &env_id);
+    let folder = worktree_folder_name(&env_id, &env_name);
+    let path = worktree_path(&repo_path, &folder);
     let path_str = path.to_string_lossy().to_string();
 
     // Reconcile any prior state for this path.
@@ -214,21 +250,23 @@ pub async fn create_env_worktree(
     })
 }
 
-/// Removes an env's worktree. Safe to call even if nothing exists.
+/// Removes a worktree by its path. Safe to call even if nothing exists.
 #[tauri::command]
-pub fn remove_env_worktree(repo_path: String, env_id: String) -> Result<(), String> {
-    let path = worktree_path(&repo_path, &env_id);
-    let path_str = path.to_string_lossy().to_string();
+pub fn remove_env_worktree(repo_path: String, worktree_path: String) -> Result<(), String> {
+    let path = Path::new(&worktree_path);
 
     if !path.exists() {
         let _ = run_git(&repo_path, &["worktree", "prune"]);
         return Ok(());
     }
 
-    let result = run_git(&repo_path, &["worktree", "remove", "--force", &path_str])?;
+    let result = run_git(
+        &repo_path,
+        &["worktree", "remove", "--force", &worktree_path],
+    )?;
     if !result.status.success() {
         // Fallback: nuke the directory and ask git to clean up its ref.
-        let _ = fs::remove_dir_all(&path);
+        let _ = fs::remove_dir_all(path);
         let _ = run_git(&repo_path, &["worktree", "prune"]);
     }
     Ok(())
@@ -267,6 +305,29 @@ pub fn list_worktrees(repo_path: String) -> Result<Vec<WorktreeListEntry>, Strin
         });
     }
     Ok(entries)
+}
+
+/// Opens a folder in the OS file manager (Finder on macOS, Explorer on
+/// Windows, default file manager on Linux). Used because the shell plugin's
+/// default scope only permits URL schemes, not filesystem paths.
+#[tauri::command]
+pub fn reveal_in_folder(path: String) -> Result<(), String> {
+    if !Path::new(&path).exists() {
+        return Err(format!("Folder not found: {}", path));
+    }
+
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(&path).output();
+    #[cfg(target_os = "windows")]
+    let result = Command::new("explorer").arg(&path).output();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(&path).output();
+
+    match result {
+        Ok(o) if o.status.success() => Ok(()),
+        Ok(o) => Err(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Err(e) => Err(format!("Failed to open folder: {}", e)),
+    }
 }
 
 /// Inspects the project root and infers whether it's a frontend, backend,

@@ -1,0 +1,25 @@
+:host {
+  display: block;
+}
+
+.resizer-v {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+  position: relative;
+  z-index: 1;
+}
+
+.resizer-v::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  left: -3px;
+  right: -3px;
+}
+
+.resizer-v:hover,
+.resizer-v.dragging {
+  background: rgb(99 102 241 / 0.4);
+}

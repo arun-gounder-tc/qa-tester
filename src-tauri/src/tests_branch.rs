@@ -7,7 +7,7 @@ use std::process::Command;
 const TESTS_BRANCH: &str = "tests";
 /// Bump this whenever the scaffold contents change. Outdated branches
 /// will be detected as `NeedsUpdate` and offered an auto-sync.
-const SCAFFOLD_VERSION: u32 = 2;
+const SCAFFOLD_VERSION: u32 = 4;
 const SCAFFOLD_VERSION_FILE: &str = ".qa-tester-scaffold";
 
 #[derive(Serialize)]
@@ -345,24 +345,58 @@ Do not edit application code in this branch — only tests.
             "CLAUDE.md",
             r#"# Tester Assistant Instructions
 
-You are helping a manual tester (non-developer) create Cypress tests.
+You are helping a manual tester (non-developer) create Cypress tests via a
+desktop app. Each chat turn is a one-shot `claude -p` call. **Never ask the
+tester questions about file paths, folder names, describe/it block wording,
+or any technical structure.** Make those decisions yourself.
 
 ## Communication
-- Use plain language, mix of Hindi/English as the user prefers.
-- Never show raw code or file paths.
-- Present choices as numbered options.
-- Always confirm before creating or modifying files.
+- Plain language only. The tester is not a developer.
+- Mix Hindi + English to match how the user writes to you.
+- Never show raw file paths, shell commands, or code unless the user
+  explicitly asks for the code.
+- Keep replies short (2–3 lines). After writing a file, just say what you
+  did in plain words, e.g. "Login test bana diya. Run karke dekhna hai?"
 
-## Test Generation
-- Write tests in `tests/e2e/<feature>/<name>.cy.js`.
-- Reuse helpers from `tests/support/commands.js`.
-- Centralize selectors in `tests/support/selectors.js`.
-- After saving, ask: "Run karke dekhna hai?"
+## DO NOT ask the tester
+- ❌ "File kahan banayein?" / "Where should I put the file?"
+- ❌ "Filename kya rakhun?" / "What should the file name be?"
+- ❌ "Describe block mein kya likhun?"
+- ❌ "Confirm karein?" / "Should I proceed?"
+- ❌ Numbered choices about technical structure.
 
-## Conventions
-- File naming: feature/test-name.cy.js
-- Describe block: feature name
-- It block: "should <action>"
+These decisions are your job, not the tester's. Just write the file.
+
+## Where to put each test
+Use these fixed categories (folders already exist under `tests/e2e/`):
+
+| Folder         | What goes here                                       |
+| -------------- | ---------------------------------------------------- |
+| `auth/`        | login, signup, logout, password reset, sessions      |
+| `navigation/`  | page loads, URL routes, menus, links, redirects      |
+| `forms/`       | form validation, field input, submit handling        |
+| `data/`        | CRUD, lists, search, filters, tables                 |
+| `smoke/`       | quick health checks, "page loads", basic visibility  |
+
+If a test really doesn't fit any of these, create a folder under
+`tests/e2e/misc/` — but try one of the five first.
+
+## Filename rule
+- Derive from the test action in kebab-case.
+- Example: "login with valid email" → `login-valid-email.cy.js`
+- Example: "homepage loads" → `homepage-loads.cy.js`
+- If a file with that name already exists, append `-v2`, `-v3`, etc.
+
+## Test structure
+- `describe('<Feature name>', () => { ... })` — feature in title case
+  (e.g., "Login", "Homepage", "Signup form").
+- `it('should <action>', () => { ... })` — action in present tense.
+- Use the env's deployed URL (from `.env-config.json`) for `cy.visit()`
+  when the user hasn't given a specific URL.
+- Prefer `data-testid` selectors. Fall back to role/label/text content.
+  Avoid fragile CSS class selectors.
+- Reuse helpers from `tests/support/commands.js` and selectors from
+  `tests/support/selectors.js` when patterns repeat.
 "#,
         ),
         (
@@ -401,7 +435,11 @@ You are helping a manual tester (non-developer) create Cypress tests.
 // };
 "#,
         ),
-        ("tests/e2e/.gitkeep", ""),
+        ("tests/e2e/auth/.gitkeep", ""),
+        ("tests/e2e/navigation/.gitkeep", ""),
+        ("tests/e2e/forms/.gitkeep", ""),
+        ("tests/e2e/data/.gitkeep", ""),
+        ("tests/e2e/smoke/.gitkeep", ""),
         ("tests/fixtures/.gitkeep", ""),
     ];
 

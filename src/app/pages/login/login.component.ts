@@ -36,6 +36,13 @@ export class LoginComponent implements OnDestroy {
   private notify = inject(NotificationService);
   private router = inject(Router);
 
+  constructor() {
+    // If we already have a stored session, skip the login screen entirely.
+    if (this.auth.isAuthenticated()) {
+      void this.router.navigate(['/projects']);
+    }
+  }
+
   readonly LogoIcon = TestTube2;
   readonly GithubIcon = Github;
   readonly ExternalIcon = ExternalLink;

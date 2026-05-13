@@ -54,3 +54,59 @@
            transition-colors;
   }
 }
+
+/* highlight.js theme — must live outside component CSS because the spans
+   are injected via innerHTML and bypass Angular's view encapsulation. */
+.code-preview {
+  background: #f6f8fa;
+  color: #24292f;
+  line-height: 1.55;
+}
+.code-preview .hljs {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.code-preview .hljs-comment,
+.code-preview .hljs-quote {
+  color: #6e7781;
+  font-style: italic;
+}
+.code-preview .hljs-keyword,
+.code-preview .hljs-selector-tag,
+.code-preview .hljs-literal,
+.code-preview .hljs-built_in {
+  color: #cf222e;
+}
+.code-preview .hljs-string,
+.code-preview .hljs-template-string,
+.code-preview .hljs-regexp,
+.code-preview .hljs-attr {
+  color: #0a3069;
+}
+.code-preview .hljs-number,
+.code-preview .hljs-symbol,
+.code-preview .hljs-bullet {
+  color: #0550ae;
+}
+.code-preview .hljs-title,
+.code-preview .hljs-title.function_,
+.code-preview .hljs-section {
+  color: #8250df;
+}
+.code-preview .hljs-variable,
+.code-preview .hljs-template-variable,
+.code-preview .hljs-name {
+  color: #953800;
+}
+.code-preview .hljs-type,
+.code-preview .hljs-class .hljs-title {
+  color: #0550ae;
+}
+.code-preview .hljs-tag,
+.code-preview .hljs-meta {
+  color: #116329;
+}
+.code-preview .hljs-property {
+  color: #0550ae;
+}

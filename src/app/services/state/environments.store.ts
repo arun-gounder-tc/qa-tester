@@ -44,6 +44,14 @@ export class EnvironmentsStore {
     this.persist();
   }
 
+  replaceEnvironments(projectId: string, environments: Environment[]): void {
+    this._envsByProject.update((map) => ({
+      ...map,
+      [projectId]: environments,
+    }));
+    this.persist();
+  }
+
   removeEnvironment(projectId: string, envId: string): void {
     this._envsByProject.update((map) => ({
       ...map,

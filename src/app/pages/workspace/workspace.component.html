@@ -1,0 +1,365 @@
+<div class="h-screen flex flex-col bg-surface-subtle">
+  <header class="bg-surface border-b border-border shrink-0">
+    <div class="px-6 h-14 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          class="inline-flex items-center justify-center h-8 w-8 rounded-md text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
+          (click)="goBack()"
+          title="Back to project"
+        >
+          <lucide-icon [img]="BackIcon" [size]="15"></lucide-icon>
+        </button>
+
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="flex items-center justify-center h-7 w-7 rounded-md bg-content text-content-inverse shrink-0">
+            <lucide-icon [img]="LogoIcon" [size]="14"></lucide-icon>
+          </div>
+          @if (project()) {
+            <span class="text-sm font-semibold text-content truncate">
+              {{ project()!.name }}
+            </span>
+          }
+        </div>
+
+        @if (activeEnv()) {
+          <span class="text-content-disabled">/</span>
+          <div #envMenu class="relative">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 h-8 px-2.5 rounded-md hover:bg-surface-muted transition-colors"
+              (click)="toggleEnvMenu()"
+            >
+              <span
+                [class]="badgeColor(activeEnv()!.color) + ' h-2 w-2 rounded-full shrink-0'"
+                aria-hidden="true"
+              ></span>
+              <span class="text-sm font-medium text-content">
+                {{ activeEnv()!.name }}
+              </span>
+              <lucide-icon
+                [img]="ChevronDownIcon"
+                [size]="13"
+                class="text-content-muted"
+              ></lucide-icon>
+            </button>
+            @if (isEnvMenuOpen()) {
+              <div class="absolute left-0 top-full mt-1 min-w-[220px] bg-surface border border-border rounded-md shadow-lg overflow-hidden z-10">
+                <div class="px-3 py-2 text-xs text-content-muted border-b border-border-subtle">
+                  Switch environment
+                </div>
+                @if (otherEnvs().length === 0) {
+                  <div class="px-3 py-2.5 text-xs text-content-disabled">
+                    No other environments
+                  </div>
+                } @else {
+                  @for (env of otherEnvs(); track env.id) {
+                    <button
+                      type="button"
+                      class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-muted transition-colors text-left"
+                      (click)="switchEnv(env)"
+                    >
+                      <span
+                        [class]="badgeColor(env.color) + ' h-2 w-2 rounded-full shrink-0'"
+                        aria-hidden="true"
+                      ></span>
+                      <div class="min-w-0 flex-1">
+                        <div class="text-sm text-content">{{ env.name }}</div>
+                        <div class="text-xs text-content-muted truncate font-mono">{{ env.codeBranch }}</div>
+                      </div>
+                    </button>
+                  }
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <app-user-menu></app-user-menu>
+    </div>
+  </header>
+
+  <main
+    class="flex-1 flex min-h-0"
+    [class.select-none]="draggingDivider() !== null"
+  >
+    <!-- Left: Tests list -->
+    <aside
+      [style.width.px]="leftWidth()"
+      class="border-r border-border bg-surface flex flex-col min-h-0 shrink-0"
+    >
+      <div class="px-4 h-11 flex items-center justify-between border-b border-border-subtle shrink-0">
+        <h2 class="text-xs font-semibold text-content-muted uppercase tracking-wider">
+          Tests
+        </h2>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
+          (click)="retryLoad()"
+          title="Refresh"
+        >
+          <lucide-icon [img]="LoaderIcon" [size]="12"></lucide-icon>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-2 min-h-0">
+        @switch (filesPhase().kind) {
+          @case ('loading') {
+            <div class="flex items-center gap-2 px-2 py-3 text-xs text-content-muted">
+              <lucide-icon [img]="LoaderIcon" [size]="12" class="animate-spin"></lucide-icon>
+              Loading tests…
+            </div>
+          }
+          @case ('error') {
+            @let phase = filesPhase();
+            @if (phase.kind === 'error') {
+              <div class="px-2 py-3">
+                <p class="text-xs text-danger mb-2">{{ phase.message }}</p>
+                <button
+                  type="button"
+                  class="text-xs text-content-muted hover:text-content underline"
+                  (click)="retryLoad()"
+                >
+                  Try again
+                </button>
+              </div>
+            }
+          }
+          @default {
+            @if (!hasFiles()) {
+              <div class="px-3 py-6 text-center">
+                <div class="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-surface-muted text-content-muted mb-3">
+                  <lucide-icon [img]="FileIcon" [size]="18"></lucide-icon>
+                </div>
+                <p class="text-sm font-medium text-content">No tests yet</p>
+                <p class="text-xs text-content-muted mt-1 leading-relaxed">
+                  Ask the AI assistant to create your first test.
+                </p>
+              </div>
+            } @else {
+              @for (group of groupedFiles(); track group.directory) {
+                <div class="mb-2">
+                  @if (group.directory) {
+                    <div class="flex items-center gap-1.5 px-2 py-1 text-xs text-content-muted">
+                      <lucide-icon [img]="FolderIcon" [size]="12"></lucide-icon>
+                      <span class="font-mono">{{ group.directory }}</span>
+                    </div>
+                  }
+                  @for (file of group.files; track file.path) {
+                    <button
+                      type="button"
+                      [class]="
+                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors text-xs ' +
+                        (group.directory ? 'pl-6 ' : '') +
+                        (selectedFile()?.path === file.path
+                          ? 'bg-brand-subtle text-content'
+                          : 'text-content-muted hover:bg-surface-muted hover:text-content')
+                      "
+                      (click)="selectFile(file)"
+                    >
+                      <lucide-icon [img]="FileIcon" [size]="12" class="shrink-0"></lucide-icon>
+                      <span class="truncate font-mono">{{ file.name }}</span>
+                    </button>
+                  }
+                </div>
+              }
+            }
+          }
+        }
+      </div>
+    </aside>
+
+    <!-- Resizer between left and middle -->
+    <div
+      class="resizer-v shrink-0"
+      [class.dragging]="draggingDivider() === 'left'"
+      (mousedown)="startResize('left', $event)"
+    ></div>
+
+    <!-- Middle: AI chat -->
+    <section class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-subtle">
+      @if (chatAvailable() === false) {
+        <div class="flex-1 flex flex-col items-center justify-center px-8 text-center">
+          <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface-muted text-content-muted mb-4">
+            <lucide-icon [img]="ChatIcon" [size]="22"></lucide-icon>
+          </div>
+          <h3 class="text-base font-semibold text-content tracking-tight">
+            Claude Code not detected
+          </h3>
+          <p class="text-sm text-content-muted mt-1.5 max-w-md leading-relaxed">
+            Install Claude Code and make sure the <code class="font-mono text-content">claude</code> command works in your terminal, then reopen this workspace.
+          </p>
+        </div>
+      } @else {
+        <div class="border-b border-border bg-surface px-4 h-11 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-2">
+            <lucide-icon [img]="SparklesIcon" [size]="13" class="text-brand"></lucide-icon>
+            <span class="text-sm font-medium text-content">Claude</span>
+          </div>
+          @if (hasMessages()) {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
+              (click)="clearChat()"
+              title="Clear chat"
+            >
+              <lucide-icon [img]="TrashIcon" [size]="11"></lucide-icon>
+              Clear
+            </button>
+          }
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-4 py-4 min-h-0">
+          @if (!hasMessages() && !isSending()) {
+            <div class="h-full flex flex-col items-center justify-center text-center px-4">
+              <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-brand-subtle text-brand mb-4">
+                <lucide-icon [img]="SparklesIcon" [size]="22"></lucide-icon>
+              </div>
+              <h3 class="text-base font-semibold text-content tracking-tight">
+                Hi! What test do you want to create?
+              </h3>
+              <p class="text-sm text-content-muted mt-1.5 max-w-md leading-relaxed">
+                Describe the user flow in plain language — Claude will write the Cypress test for you.
+              </p>
+              <div class="mt-5 grid gap-2 max-w-md w-full">
+                <button
+                  type="button"
+                  class="text-left text-xs text-content-muted hover:text-content border border-border rounded-md px-3 py-2 hover:border-border-strong hover:bg-surface transition-colors"
+                  (click)="draft.set('Write a test that logs in with email test@example.com and password Test123!')"
+                >
+                  "Write a test that logs in with email test&#64;example.com and password Test123!"
+                </button>
+                <button
+                  type="button"
+                  class="text-left text-xs text-content-muted hover:text-content border border-border rounded-md px-3 py-2 hover:border-border-strong hover:bg-surface transition-colors"
+                  (click)="draft.set('Show me the existing tests')"
+                >
+                  "Show me the existing tests"
+                </button>
+                <button
+                  type="button"
+                  class="text-left text-xs text-content-muted hover:text-content border border-border rounded-md px-3 py-2 hover:border-border-strong hover:bg-surface transition-colors"
+                  (click)="draft.set('Explain what tests/support/commands.js is for')"
+                >
+                  "Explain what tests/support/commands.js is for"
+                </button>
+              </div>
+            </div>
+          } @else {
+            <div class="max-w-3xl mx-auto space-y-4">
+              @for (msg of messages(); track $index) {
+                @if (msg.role === 'user') {
+                  <div class="flex justify-end">
+                    <div class="max-w-[80%] rounded-lg px-3.5 py-2.5 bg-brand text-white text-sm leading-relaxed whitespace-pre-wrap break-words">
+                      {{ msg.content }}
+                    </div>
+                  </div>
+                } @else {
+                  <div class="flex gap-2.5">
+                    <div class="h-7 w-7 rounded-md bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
+                      <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
+                    </div>
+                    <div class="max-w-[80%] rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle text-sm leading-relaxed whitespace-pre-wrap break-words text-content">
+                      {{ msg.content }}
+                    </div>
+                  </div>
+                }
+              }
+              @if (isSending()) {
+                <div class="flex gap-2.5">
+                  <div class="h-7 w-7 rounded-md bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
+                    <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
+                  </div>
+                  <div class="rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle">
+                    <div class="flex items-center gap-1.5">
+                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 0ms"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 150ms"></span>
+                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 300ms"></span>
+                    </div>
+                  </div>
+                </div>
+              }
+              <div #messagesEnd></div>
+            </div>
+          }
+        </div>
+
+        <div class="border-t border-border bg-surface px-4 py-3 shrink-0">
+          <div class="max-w-3xl mx-auto flex items-end gap-2">
+            <textarea
+              #chatInput
+              class="flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-disabled focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand min-h-[40px] max-h-[160px]"
+              rows="1"
+              placeholder="Describe the test you want to create…"
+              [ngModel]="draft()"
+              (ngModelChange)="draft.set($event)"
+              (keydown)="onChatKeydown($event)"
+              [disabled]="isSending()"
+            ></textarea>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center h-10 w-10 rounded-md bg-content text-content-inverse hover:bg-content/90 disabled:bg-surface-muted disabled:text-content-disabled disabled:cursor-not-allowed transition-colors shrink-0"
+              (click)="sendMessage()"
+              [disabled]="isSending() || !draft().trim()"
+              title="Send (Enter)"
+            >
+              <lucide-icon [img]="SendIcon" [size]="14"></lucide-icon>
+            </button>
+          </div>
+          <p class="max-w-3xl mx-auto text-xs text-content-disabled mt-1.5">
+            Enter to send · Shift+Enter for newline
+          </p>
+        </div>
+      }
+    </section>
+
+    <!-- Resizer between middle and right -->
+    <div
+      class="resizer-v shrink-0"
+      [class.dragging]="draggingDivider() === 'right'"
+      (mousedown)="startResize('right', $event)"
+    ></div>
+
+    <!-- Right: File preview (or empty state) -->
+    <aside
+      [style.width.px]="rightWidth()"
+      class="border-l border-border bg-surface flex flex-col min-h-0 shrink-0"
+    >
+      @if (selectedFile()) {
+        <div class="border-b border-border-subtle px-4 h-11 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <lucide-icon [img]="FileIcon" [size]="13" class="text-content-muted shrink-0"></lucide-icon>
+            <span class="text-xs font-mono text-content truncate">{{ selectedFile()!.relative_path }}</span>
+          </div>
+          <button
+            type="button"
+            class="h-6 w-6 inline-flex items-center justify-center rounded-md text-content-muted hover:text-content hover:bg-surface-muted transition-colors text-xs"
+            (click)="closeFilePreview()"
+            title="Close"
+          >×</button>
+        </div>
+        @if (selectedFileContent() == null) {
+          <div class="flex-1 flex items-center justify-center text-xs text-content-muted">Loading…</div>
+        } @else {
+          <pre class="flex-1 overflow-auto p-3 text-xs font-mono m-0 code-preview"><code class="hljs language-javascript" [innerHTML]="highlightedCode()"></code></pre>
+        }
+      } @else {
+        <div class="px-4 h-11 flex items-center border-b border-border-subtle shrink-0">
+          <h2 class="text-xs font-semibold text-content-muted uppercase tracking-wider">
+            Preview
+          </h2>
+        </div>
+        <div class="flex-1 flex flex-col items-center justify-center p-6 text-center min-h-0">
+          <div class="inline-flex items-center justify-center h-10 w-10 rounded-lg bg-surface-muted text-content-muted mb-3">
+            <lucide-icon [img]="FileIcon" [size]="18"></lucide-icon>
+          </div>
+          <p class="text-sm font-medium text-content">Test preview</p>
+          <p class="text-xs text-content-muted mt-1.5 leading-relaxed">
+            Select a test from the left to view its contents here.
+          </p>
+        </div>
+      }
+    </aside>
+  </main>
+</div>
