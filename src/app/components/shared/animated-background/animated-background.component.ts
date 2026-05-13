@@ -34,11 +34,11 @@ export class AnimatedBackgroundComponent implements AfterViewInit, OnDestroy {
   private animationId: number | null = null;
   private particles: Particle[] = [];
   private dpr = window.devicePixelRatio || 1;
+  private resizeObserver: ResizeObserver | null = null;
+  private lastSeededSize = { w: 0, h: 0 };
 
   private readonly PARTICLE_COUNT = 60;
   private readonly LINK_DISTANCE = 130;
-  private readonly PARTICLE_COLOR = 'rgba(99, 102, 241, 0.55)';
-  private readonly LINK_COLOR_RGB = '99, 102, 241';
 
   ngAfterViewInit(): void {
     if (this.prefersReducedMotion()) return;
@@ -48,16 +48,40 @@ export class AnimatedBackgroundComponent implements AfterViewInit, OnDestroy {
     this.resize();
     this.seed();
     this.tick();
+
+    // The host may grow after fonts/layout settle. Re-size + re-seed
+    // whenever its real bounding box changes meaningfully.
+    if ('ResizeObserver' in window) {
+      this.resizeObserver = new ResizeObserver(() => this.handleHostResize());
+      this.resizeObserver.observe(this.host.nativeElement);
+    }
   }
 
   ngOnDestroy(): void {
     if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
     }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
   }
 
   @HostListener('window:resize')
   onResize(): void {
+    this.handleHostResize();
+  }
+
+  private handleHostResize(): void {
+    const rect = this.host.nativeElement.getBoundingClientRect();
+    // Skip noise — only re-seed if size meaningfully changed.
+    if (
+      Math.abs(rect.width - this.lastSeededSize.w) < 20 &&
+      Math.abs(rect.height - this.lastSeededSize.h) < 20
+    ) {
+      this.resize();
+      return;
+    }
     this.resize();
     this.seed();
   }
@@ -69,33 +93,56 @@ export class AnimatedBackgroundComponent implements AfterViewInit, OnDestroy {
   private resize(): void {
     const canvas = this.canvasRef.nativeElement;
     const rect = this.host.nativeElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
     canvas.width = rect.width * this.dpr;
     canvas.height = rect.height * this.dpr;
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
-    this.ctx?.scale(this.dpr, this.dpr);
+    // Setting canvas.width resets the context transform, so reapply DPR.
+    this.ctx?.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
   private seed(): void {
     const canvas = this.canvasRef.nativeElement;
     const width = canvas.width / this.dpr;
     const height = canvas.height / this.dpr;
-    this.particles = Array.from({ length: this.PARTICLE_COUNT }, () => ({
+    if (width <= 0 || height <= 0) return;
+    // Scale particle count with viewport area so big screens look populated.
+    const area = width * height;
+    const count = Math.min(
+      140,
+      Math.max(this.PARTICLE_COUNT, Math.round(area / 14000)),
+    );
+    this.particles = Array.from({ length: count }, () => ({
       x: Math.random() * width,
       y: Math.random() * height,
       vx: (Math.random() - 0.5) * 0.25,
       vy: (Math.random() - 0.5) * 0.25,
       radius: Math.random() * 1.4 + 0.6,
     }));
+    this.lastSeededSize = { w: width, h: height };
+  }
+
+  private brandRgb = '99 102 241';
+
+  private refreshBrandColor(): void {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-brand')
+      .trim();
+    if (value) this.brandRgb = value;
   }
 
   private tick = (): void => {
     if (!this.ctx) return;
+    // Re-read brand color once per frame so theme switches take effect live.
+    this.refreshBrandColor();
     const canvas = this.canvasRef.nativeElement;
     const width = canvas.width / this.dpr;
     const height = canvas.height / this.dpr;
 
     this.ctx.clearRect(0, 0, width, height);
+
+    const particleColor = `rgb(${this.brandRgb} / 0.55)`;
 
     for (const p of this.particles) {
       p.x += p.vx;
@@ -106,7 +153,7 @@ export class AnimatedBackgroundComponent implements AfterViewInit, OnDestroy {
 
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = this.PARTICLE_COLOR;
+      this.ctx.fillStyle = particleColor;
       this.ctx.fill();
     }
 
@@ -123,7 +170,7 @@ export class AnimatedBackgroundComponent implements AfterViewInit, OnDestroy {
           this.ctx.beginPath();
           this.ctx.moveTo(a.x, a.y);
           this.ctx.lineTo(b.x, b.y);
-          this.ctx.strokeStyle = `rgba(${this.LINK_COLOR_RGB}, ${opacity})`;
+          this.ctx.strokeStyle = `rgb(${this.brandRgb} / ${opacity})`;
           this.ctx.lineWidth = 0.6;
           this.ctx.stroke();
         }

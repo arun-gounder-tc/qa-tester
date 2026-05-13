@@ -47,6 +47,16 @@
     --color-shadow: 0 0 0;
     --bg-noise-opacity: 0.025;
 
+    /* Animated background (login page) */
+    --bg-host: 250 250 250;
+    --bg-blob-1: 199 210 254;
+    --bg-blob-2: 221 214 254;
+    --bg-blob-3: 186 230 253;
+    --bg-blob-4: 251 207 232;
+    --bg-vignette: 255 255 255;
+    --bg-blob-opacity: 0.55;
+    --bg-vignette-opacity: 0.65;
+
     color-scheme: light;
   }
 
@@ -92,6 +102,16 @@
     /* Effects */
     --color-shadow: 0 0 0;
     --bg-noise-opacity: 0.04;
+
+    /* Animated background — deep, saturated for dark */
+    --bg-host: 7 7 9;
+    --bg-blob-1: 49 46 129;
+    --bg-blob-2: 76 29 149;
+    --bg-blob-3: 30 58 138;
+    --bg-blob-4: 131 24 67;
+    --bg-vignette: 0 0 0;
+    --bg-blob-opacity: 0.45;
+    --bg-vignette-opacity: 0.55;
 
     color-scheme: dark;
   }

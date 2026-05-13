@@ -4,7 +4,8 @@
   overflow: hidden;
   pointer-events: none;
   z-index: 0;
-  background: #fafafa;
+  background: rgb(var(--bg-host));
+  transition: background-color 200ms ease;
 }
 
 .mesh {
@@ -17,7 +18,7 @@
   position: absolute;
   border-radius: 50%;
   filter: blur(90px);
-  opacity: 0.55;
+  opacity: var(--bg-blob-opacity);
   will-change: transform;
 }
 
@@ -26,7 +27,7 @@
   height: 620px;
   top: -18%;
   left: -12%;
-  background: radial-gradient(circle, #c7d2fe 0%, transparent 70%);
+  background: radial-gradient(circle, rgb(var(--bg-blob-1)) 0%, transparent 70%);
   animation: drift-1 24s ease-in-out infinite;
 }
 
@@ -35,7 +36,7 @@
   height: 520px;
   top: 30%;
   right: -10%;
-  background: radial-gradient(circle, #ddd6fe 0%, transparent 70%);
+  background: radial-gradient(circle, rgb(var(--bg-blob-2)) 0%, transparent 70%);
   animation: drift-2 28s ease-in-out infinite;
 }
 
@@ -44,7 +45,7 @@
   height: 700px;
   bottom: -22%;
   left: 28%;
-  background: radial-gradient(circle, #bae6fd 0%, transparent 70%);
+  background: radial-gradient(circle, rgb(var(--bg-blob-3)) 0%, transparent 70%);
   animation: drift-3 26s ease-in-out infinite;
 }
 
@@ -53,9 +54,9 @@
   height: 420px;
   top: 12%;
   right: 28%;
-  background: radial-gradient(circle, #fbcfe8 0%, transparent 70%);
+  background: radial-gradient(circle, rgb(var(--bg-blob-4)) 0%, transparent 70%);
   animation: drift-4 32s ease-in-out infinite;
-  opacity: 0.4;
+  opacity: calc(var(--bg-blob-opacity) * 0.75);
 }
 
 .particles {
@@ -69,8 +70,8 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at center, transparent 40%, rgba(255, 255, 255, 0.65) 100%),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
+    radial-gradient(ellipse at center, transparent 40%, rgb(var(--bg-vignette) / var(--bg-vignette-opacity)) 100%),
+    linear-gradient(to bottom, rgb(var(--bg-vignette) / calc(var(--bg-vignette-opacity) * 0.45)), rgb(var(--bg-vignette) / 0));
 }
 
 @keyframes drift-1 {
