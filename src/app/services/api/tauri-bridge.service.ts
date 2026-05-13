@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { homeDir } from '@tauri-apps/api/path';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 
 export interface RepoStatus {
@@ -79,6 +80,32 @@ export interface ChatEnvContext {
   framework?: string | null;
 }
 
+export interface CypressStatus {
+  installed: boolean;
+  node_modules_exists: boolean;
+}
+
+export interface LocalArtifactsInfo {
+  has_screenshots: boolean;
+  has_videos: boolean;
+  has_downloads: boolean;
+}
+
+export interface CypressChunk {
+  run_id: string;
+  line: string;
+  stream: 'stdout' | 'stderr';
+}
+
+export interface CypressDone {
+  run_id: string;
+  success: boolean;
+  code: number | null;
+  error: string | null;
+  log_path: string | null;
+  artifacts_dir: string | null;
+}
+
 export interface DeviceCode {
   device_code: string;
   user_code: string;
@@ -149,6 +176,24 @@ export class TauriBridgeService {
     });
   }
 
+  testsStatus(repoPath: string): Promise<string[]> {
+    this.assertTauri('tests_status');
+    return invoke<string[]>('tests_status', { repoPath });
+  }
+
+  commitAndPushTests(
+    repoPath: string,
+    message: string,
+    token?: string,
+  ): Promise<void> {
+    this.assertTauri('commit_and_push_tests');
+    return invoke<void>('commit_and_push_tests', {
+      repoPath,
+      message,
+      token: token ?? null,
+    });
+  }
+
   // Worktrees + project detection
   createEnvWorktree(
     repoPath: string,
@@ -185,6 +230,10 @@ export class TauriBridgeService {
   revealInFinder(path: string): Promise<void> {
     this.assertTauri('reveal_in_folder');
     return invoke<void>('reveal_in_folder', { path });
+  }
+
+  async getHomeDir(): Promise<string> {
+    return await homeDir();
   }
 
   // Env config sync (tests branch)
@@ -238,6 +287,46 @@ export class TauriBridgeService {
       envContext,
       history,
       message,
+    });
+  }
+
+  // Cypress
+  cypressCheck(repoPath: string): Promise<CypressStatus> {
+    this.assertTauri('cypress_check');
+    return invoke<CypressStatus>('cypress_check', { repoPath });
+  }
+
+  cypressInstall(repoPath: string, runId: string): Promise<void> {
+    this.assertTauri('cypress_install');
+    return invoke<void>('cypress_install', { repoPath, runId });
+  }
+
+  checkLocalArtifacts(repoPath: string): Promise<LocalArtifactsInfo> {
+    this.assertTauri('check_local_artifacts');
+    return invoke<LocalArtifactsInfo>('check_local_artifacts', { repoPath });
+  }
+
+  cleanLocalArtifacts(repoPath: string): Promise<void> {
+    this.assertTauri('clean_local_artifacts');
+    return invoke<void>('clean_local_artifacts', { repoPath });
+  }
+
+  cypressRun(
+    repoPath: string,
+    runId: string,
+    baseUrl: string,
+    spec: string | null,
+    headed: boolean = false,
+    artifactsDir: string | null = null,
+  ): Promise<void> {
+    this.assertTauri('cypress_run');
+    return invoke<void>('cypress_run', {
+      repoPath,
+      runId,
+      baseUrl,
+      spec,
+      headed,
+      artifactsDir,
     });
   }
 

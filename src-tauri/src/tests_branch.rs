@@ -7,7 +7,7 @@ use std::process::Command;
 const TESTS_BRANCH: &str = "tests";
 /// Bump this whenever the scaffold contents change. Outdated branches
 /// will be detected as `NeedsUpdate` and offered an auto-sync.
-const SCAFFOLD_VERSION: u32 = 4;
+const SCAFFOLD_VERSION: u32 = 5;
 const SCAFFOLD_VERSION_FILE: &str = ".qa-tester-scaffold";
 
 #[derive(Serialize)]
@@ -82,14 +82,11 @@ fn has_scaffold_on_disk(repo_path: &str) -> bool {
         || Path::new(repo_path).join("cypress.config.js").exists()
 }
 
-fn has_scaffold_on_branch(repo_path: &str, branch: &str) -> bool {
-    let out = run_git(repo_path, &["ls-tree", "-r", branch, "--name-only"]);
+fn ref_has_scaffold(repo_path: &str, git_ref: &str) -> bool {
+    let out = run_git(repo_path, &["ls-tree", "-r", git_ref, "--name-only"]);
     match out {
         Ok(o) if o.status.success() => {
             let stdout = String::from_utf8_lossy(&o.stdout);
-            // Our explicit marker file is the most reliable signature.
-            // Fall back to cypress.config.{js,ts} for v1 scaffolds that
-            // predate the marker.
             stdout.lines().any(|line| {
                 line == SCAFFOLD_VERSION_FILE
                     || line == "cypress.config.js"
@@ -98,6 +95,17 @@ fn has_scaffold_on_branch(repo_path: &str, branch: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Checks for scaffold on the local branch first, then falls back to
+/// `origin/<branch>` so we don't false-flag "missing scaffold" when the
+/// local ref is just stale (e.g., a teammate pushed the scaffold but this
+/// user hasn't pulled yet).
+fn has_scaffold_on_branch(repo_path: &str, branch: &str) -> bool {
+    if ref_has_scaffold(repo_path, branch) {
+        return true;
+    }
+    ref_has_scaffold(repo_path, &format!("origin/{}", branch))
 }
 
 fn scaffold_version_on_branch(repo_path: &str, branch: &str) -> u32 {
@@ -132,6 +140,13 @@ pub fn check_tests_branch(
     let current = current_branch(&repo_path);
 
     let local = local_branch_exists(&repo_path, TESTS_BRANCH);
+    // Refresh `origin/tests` so the scaffold-on-branch check below can fall
+    // back to the remote ref when the local one is out of date.
+    let _ = run_git_with_auth(
+        &repo_path,
+        &token,
+        &["fetch", "origin", TESTS_BRANCH, "--quiet"],
+    );
     let remote = remote_branch_exists(&repo_path, TESTS_BRANCH, &token).unwrap_or(false);
 
     let status = if local {
@@ -259,7 +274,14 @@ fn write_scaffold(repo_path: &str) -> Result<Vec<PathBuf>, String> {
     let written: Vec<(&str, &str)> = vec![
         (
             "cypress.config.js",
-            r#"const { defineConfig } = require('cypress');
+            r#"const path = require('path');
+const { defineConfig } = require('cypress');
+
+// CYPRESS_ARTIFACTS_DIR is set by the QA Tester app so every run's
+// screenshots/videos live outside the repo. Falls back to the default
+// `cypress/` paths if the env var isn't set (e.g., running cypress
+// manually from the terminal).
+const artifactsDir = process.env.CYPRESS_ARTIFACTS_DIR;
 
 module.exports = defineConfig({
   e2e: {
@@ -268,6 +290,15 @@ module.exports = defineConfig({
     fixturesFolder: 'tests/fixtures',
     video: true,
     screenshotOnRunFailure: true,
+    screenshotsFolder: artifactsDir
+      ? path.join(artifactsDir, 'screenshots')
+      : 'cypress/screenshots',
+    videosFolder: artifactsDir
+      ? path.join(artifactsDir, 'videos')
+      : 'cypress/videos',
+    downloadsFolder: artifactsDir
+      ? path.join(artifactsDir, 'downloads')
+      : 'cypress/downloads',
   },
 });
 "#,
@@ -587,6 +618,85 @@ pub async fn bootstrap_tests_branch(
             "Could not commit. Set 'git config user.name' and 'user.email'. {}",
             stderr.trim()
         ));
+    }
+
+    push_tests_branch(&repo_path, &token)
+}
+
+/// Returns the list of files in the `tests/` directory that have
+/// uncommitted changes (modified, added, deleted, or untracked). Used by
+/// the workspace to remind testers to push their work.
+#[tauri::command]
+pub fn tests_status(repo_path: String) -> Result<Vec<String>, String> {
+    let path = Path::new(&repo_path);
+    if !path.exists() {
+        return Err(format!("Repository folder not found: {}", repo_path));
+    }
+    let out = run_git(&repo_path, &["status", "--porcelain", "--", "tests/"])?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let files: Vec<String> = stdout
+        .lines()
+        .filter_map(|line| {
+            // Porcelain format: 2 status chars + space + filename.
+            if line.len() > 3 {
+                Some(line[3..].to_string())
+            } else {
+                None
+            }
+        })
+        .filter(|f| f.starts_with("tests/"))
+        .collect();
+    Ok(files)
+}
+
+/// Stages every change inside `tests/`, commits with the given message,
+/// and pushes to origin/tests. Idempotent — returns successfully if there
+/// was nothing to commit.
+#[tauri::command]
+pub async fn commit_and_push_tests(
+    repo_path: String,
+    message: String,
+    token: Option<String>,
+) -> Result<(), String> {
+    let path = Path::new(&repo_path);
+    if !path.exists() {
+        return Err(format!("Repository folder not found: {}", repo_path));
+    }
+
+    // Make sure we're on the tests branch before staging.
+    let current = current_branch(&repo_path);
+    if current.as_deref() != Some(TESTS_BRANCH) {
+        let checkout = run_git(&repo_path, &["checkout", TESTS_BRANCH])?;
+        if !checkout.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout.stderr);
+            return Err(format!(
+                "Cannot switch to tests branch: {}",
+                stderr.trim()
+            ));
+        }
+    }
+
+    let add = run_git(&repo_path, &["add", "--", "tests/"])?;
+    if !add.status.success() {
+        return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
+    }
+
+    // If nothing to commit, just try to flush any unpushed prior commits.
+    let diff = run_git(&repo_path, &["diff", "--cached", "--quiet"])?;
+    let needs_commit = !diff.status.success();
+
+    if needs_commit {
+        let commit = run_git(&repo_path, &["commit", "-m", &message])?;
+        if !commit.status.success() {
+            let stderr = String::from_utf8_lossy(&commit.stderr);
+            return Err(format!(
+                "Could not commit tests. Set 'git config user.name' and 'user.email'. {}",
+                stderr.trim()
+            ));
+        }
     }
 
     push_tests_branch(&repo_path, &token)

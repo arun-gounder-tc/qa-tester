@@ -76,9 +76,89 @@
         }
       </div>
 
-      <app-user-menu></app-user-menu>
+      <div class="flex items-center gap-2">
+        @if (activeRun()) {
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs hover:bg-surface-muted transition-colors"
+            [class.text-content-muted]="activeRun()!.status === 'running'"
+            [class.text-success]="activeRun()!.status === 'passed'"
+            [class.text-danger]="activeRun()!.status === 'failed'"
+            (click)="toggleOutputPanel()"
+            title="Toggle output"
+          >
+            @if (activeRun()!.status === 'running') {
+              <lucide-icon [img]="LoaderIcon" [size]="12" class="animate-spin"></lucide-icon>
+              <span>Running</span>
+            } @else if (activeRun()!.status === 'passed') {
+              <lucide-icon [img]="CheckIcon" [size]="12"></lucide-icon>
+              <span>Passed</span>
+            } @else {
+              <lucide-icon [img]="XIcon" [size]="12"></lucide-icon>
+              <span>Failed</span>
+            }
+          </button>
+        }
+        <app-user-menu></app-user-menu>
+      </div>
     </div>
   </header>
+
+  @if (showCommitBanner()) {
+    <div class="bg-brand-subtle border-b border-brand/30 px-4 py-2 flex items-center justify-between gap-3 shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="h-6 w-6 rounded-md bg-surface text-brand inline-flex items-center justify-center shrink-0">
+          <lucide-icon [img]="SendIcon" [size]="12"></lucide-icon>
+        </div>
+        <span class="text-xs text-content">
+          <span class="font-semibold">{{ uncommittedTests().length }}</span>
+          test {{ uncommittedTests().length === 1 ? 'file' : 'files' }} not synced to GitHub yet.
+          Push so your team can see them.
+        </span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          class="inline-flex items-center h-7 px-3 rounded-md text-xs font-medium text-content-muted hover:text-content hover:bg-surface transition-colors"
+          [disabled]="isCommitting()"
+          (click)="snoozeCommitReminder()"
+        >
+          Later
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium bg-content text-content-inverse hover:bg-content/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          [disabled]="isCommitting()"
+          (click)="commitTests()"
+        >
+          @if (isCommitting()) {
+            <lucide-icon [img]="LoaderIcon" [size]="11" class="animate-spin"></lucide-icon>
+            Pushing…
+          } @else {
+            Commit &amp; push
+          }
+        </button>
+      </div>
+    </div>
+  }
+
+  @if (hasOrphanArtifacts()) {
+    <div class="bg-warning-subtle border-b border-warning/30 px-4 py-2 flex items-center justify-between gap-3 shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <lucide-icon [img]="WarnIcon" [size]="13" class="text-warning shrink-0"></lucide-icon>
+        <span class="text-xs text-content">
+          Old Cypress files found in repo (<span class="font-mono">cypress/screenshots</span>, <span class="font-mono">videos</span>, <span class="font-mono">downloads</span>). They're gitignored so they won't be committed, but you can clean them up.
+        </span>
+      </div>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium bg-surface text-content border border-border hover:border-border-strong transition-colors shrink-0"
+        (click)="cleanOrphanArtifacts()"
+      >
+        Clean up
+      </button>
+    </div>
+  }
 
   <main
     class="flex-1 flex min-h-0"
@@ -93,14 +173,41 @@
         <h2 class="text-xs font-semibold text-content-muted uppercase tracking-wider">
           Tests
         </h2>
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
-          (click)="retryLoad()"
-          title="Refresh"
-        >
-          <lucide-icon [img]="LoaderIcon" [size]="12"></lucide-icon>
-        </button>
+        <div class="flex items-center gap-1">
+          @if (hasFiles()) {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-success hover:bg-success/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              [disabled]="isRunBusy()"
+              (click)="runAll()"
+              title="Run all tests"
+            >
+              <lucide-icon [img]="PlayIcon" [size]="11"></lucide-icon>
+              Run all
+            </button>
+            <button
+              type="button"
+              [class]="
+                'inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs transition-colors ' +
+                (headedMode()
+                  ? 'bg-brand-subtle text-brand'
+                  : 'text-content-muted hover:text-content hover:bg-surface-muted')
+              "
+              (click)="toggleHeaded()"
+              [title]="headedMode() ? 'Headed mode ON — browser visible' : 'Toggle headed mode (show browser)'"
+            >
+              {{ headedMode() ? 'Headed' : 'Headless' }}
+            </button>
+          }
+          <button
+            type="button"
+            class="inline-flex items-center justify-center h-6 w-6 rounded-md text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
+            (click)="retryLoad()"
+            title="Refresh"
+          >
+            <lucide-icon [img]="LoaderIcon" [size]="11"></lucide-icon>
+          </button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-y-auto p-2 min-h-0">
@@ -147,20 +254,46 @@
                     </div>
                   }
                   @for (file of group.files; track file.path) {
-                    <button
-                      type="button"
+                    @let status = testStatusFor(file);
+                    <div
                       [class]="
-                        'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors text-xs ' +
-                        (group.directory ? 'pl-6 ' : '') +
+                        'group/file w-full flex items-center gap-1.5 pr-1 rounded-md transition-colors text-xs cursor-pointer ' +
                         (selectedFile()?.path === file.path
                           ? 'bg-brand-subtle text-content'
                           : 'text-content-muted hover:bg-surface-muted hover:text-content')
                       "
+                      role="button"
+                      tabindex="0"
                       (click)="selectFile(file)"
+                      (keydown.enter)="selectFile(file)"
                     >
-                      <lucide-icon [img]="FileIcon" [size]="12" class="shrink-0"></lucide-icon>
-                      <span class="truncate font-mono">{{ file.name }}</span>
-                    </button>
+                      <div [class]="'flex items-center gap-2 flex-1 min-w-0 py-1.5 pl-2 ' + (group.directory ? 'pl-6' : '')">
+                        @switch (status) {
+                          @case ('running') {
+                            <lucide-icon [img]="LoaderIcon" [size]="11" class="shrink-0 text-content-muted animate-spin"></lucide-icon>
+                          }
+                          @case ('passed') {
+                            <lucide-icon [img]="CheckIcon" [size]="11" class="shrink-0 text-success"></lucide-icon>
+                          }
+                          @case ('failed') {
+                            <lucide-icon [img]="XIcon" [size]="11" class="shrink-0 text-danger"></lucide-icon>
+                          }
+                          @default {
+                            <lucide-icon [img]="FileIcon" [size]="11" class="shrink-0"></lucide-icon>
+                          }
+                        }
+                        <span class="truncate font-mono">{{ file.name }}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="inline-flex items-center justify-center h-6 w-6 rounded-md text-success hover:text-success hover:bg-success/10 opacity-60 group-hover/file:opacity-100 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                        [disabled]="isRunBusy()"
+                        (click)="runTest(file, $event)"
+                        title="Run test"
+                      >
+                        <lucide-icon [img]="PlayIcon" [size]="12"></lucide-icon>
+                      </button>
+                    </div>
                   }
                 </div>
               }
@@ -362,4 +495,135 @@
       }
     </aside>
   </main>
+
+  <!-- Bottom output panel -->
+  @if (activeRun() && outputPanelOpen()) {
+    @let run = activeRun()!;
+    <!-- Resizer (horizontal) -->
+    <div
+      class="resizer-h shrink-0"
+      [class.dragging]="draggingOutput()"
+      (mousedown)="startOutputResize($event)"
+    ></div>
+    <section
+      class="border-t border-border bg-content text-content-inverse flex flex-col shrink-0"
+      [style.height.px]="outputPanelHeight()"
+      [class.select-none]="draggingOutput()"
+    >
+      <div class="h-9 px-3 flex items-center justify-between border-b border-border bg-surface-muted text-content shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <lucide-icon [img]="TerminalIcon" [size]="13" class="text-content-muted shrink-0"></lucide-icon>
+          <span class="text-xs font-medium truncate">{{ run.title }}</span>
+          @switch (run.status) {
+            @case ('running') {
+              <span class="inline-flex items-center gap-1 text-xs text-content-muted">
+                <lucide-icon [img]="LoaderIcon" [size]="11" class="animate-spin"></lucide-icon>
+                running
+              </span>
+            }
+            @case ('passed') {
+              <span class="inline-flex items-center gap-1 text-xs text-success">
+                <lucide-icon [img]="CheckIcon" [size]="11"></lucide-icon>
+                passed
+              </span>
+            }
+            @case ('failed') {
+              <span class="inline-flex items-center gap-1 text-xs text-danger">
+                <lucide-icon [img]="XIcon" [size]="11"></lucide-icon>
+                failed
+              </span>
+            }
+          }
+        </div>
+        <div class="flex items-center gap-1">
+          @if (run.kind !== 'install' && run.status !== 'running') {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface transition-colors"
+              (click)="openArtifactsFolder()"
+              title="Open cypress/ folder with screenshots and videos"
+            >
+              <lucide-icon [img]="FolderIcon" [size]="11"></lucide-icon>
+              Artifacts
+            </button>
+          }
+          <button
+            type="button"
+            class="inline-flex items-center justify-center h-6 w-6 rounded-md text-content-muted hover:text-content hover:bg-surface transition-colors text-sm"
+            (click)="closeRun()"
+            title="Close"
+          >×</button>
+        </div>
+      </div>
+      <pre #outputBox class="flex-1 overflow-auto p-3 text-xs font-mono leading-relaxed m-0 whitespace-pre-wrap break-words bg-[#0d1117] text-[#c9d1d9]">{{ run.output.join('\n') }}</pre>
+    </section>
+  }
+
+  <!-- Post-run result modal -->
+  @if (lastResult(); as r) {
+    <div
+      class="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      (click)="dismissResult()"
+    >
+      <div
+        class="bg-surface rounded-lg shadow-xl max-w-md w-full overflow-hidden"
+        (click)="$event.stopPropagation()"
+      >
+        <div class="p-6">
+          <div class="flex items-center gap-3 mb-1">
+            @if (r.status === 'passed') {
+              <div class="h-9 w-9 rounded-full bg-success/15 text-success inline-flex items-center justify-center shrink-0">
+                <lucide-icon [img]="CheckIcon" [size]="20"></lucide-icon>
+              </div>
+            } @else {
+              <div class="h-9 w-9 rounded-full bg-danger/15 text-danger inline-flex items-center justify-center shrink-0">
+                <lucide-icon [img]="XIcon" [size]="20"></lucide-icon>
+              </div>
+            }
+            <div class="min-w-0 flex-1">
+              <h3 class="text-base font-semibold text-content tracking-tight">
+                {{ r.status === 'passed' ? 'Test run passed' : 'Test run failed' }}
+              </h3>
+              <p class="text-xs text-content-muted truncate font-mono">{{ r.title }}</p>
+            </div>
+          </div>
+
+          <dl class="mt-5 space-y-2.5 text-sm">
+            <div class="flex items-center justify-between">
+              <dt class="text-content-muted">Duration</dt>
+              <dd class="text-content font-medium font-mono">{{ formatDuration(r.durationMs) }}</dd>
+            </div>
+            @if (r.artifactsDir) {
+              <div>
+                <dt class="text-content-muted mb-1">Artifacts saved at</dt>
+                <dd class="text-xs text-content font-mono bg-surface-muted rounded px-2 py-1.5 break-all">
+                  {{ r.artifactsDir }}
+                </dd>
+              </div>
+            }
+          </dl>
+        </div>
+
+        <div class="border-t border-border-subtle px-6 py-3 flex items-center justify-end gap-2 bg-surface-subtle">
+          @if (r.artifactsDir) {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm text-content-muted hover:text-content hover:bg-surface transition-colors"
+              (click)="openArtifactsFolder()"
+            >
+              <lucide-icon [img]="FolderIcon" [size]="14"></lucide-icon>
+              Open folder
+            </button>
+          }
+          <button
+            type="button"
+            class="inline-flex items-center h-9 px-4 rounded-md text-sm font-medium bg-content text-content-inverse hover:bg-content/90 transition-colors"
+            (click)="dismissResult()"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  }
 </div>

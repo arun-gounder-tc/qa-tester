@@ -10,6 +10,7 @@ import {
   HostListener,
   inject,
   input,
+  OnDestroy,
   signal,
   ViewChild,
 } from '@angular/core';
@@ -21,29 +22,38 @@ import typescript from 'highlight.js/lib/languages/typescript';
 hljs.registerLanguage('javascript', javascript);
 hljs.registerLanguage('typescript', typescript);
 import {
+  AlertTriangle,
   ArrowLeft,
+  CheckCircle2,
   ChevronDown,
+  ChevronUp,
   FileCode2,
   Folder,
   FolderOpen,
   LoaderCircle,
   LucideAngularModule,
   MessageSquare,
+  Play,
   Plus,
   Search,
   Send,
   Sparkles,
+  Terminal,
   TestTube2,
   Trash2,
+  XCircle,
 } from 'lucide-angular';
 import { UserMenuComponent } from '../../components/shared/user-menu/user-menu.component';
 import { Environment } from '../../models/environment.model';
 import {
   ChatEnvContext,
+  CypressChunk,
+  CypressDone,
   ProjectTypeInfo,
   TauriBridgeService,
   TestFile,
 } from '../../services/api/tauri-bridge.service';
+import { AuthStore } from '../../services/state/auth.store';
 import { ChatStore } from '../../services/state/chat.store';
 import { EnvironmentsStore } from '../../services/state/environments.store';
 import { ProjectsStore } from '../../services/state/projects.store';
@@ -59,6 +69,28 @@ type FilesPhase =
   | { kind: 'ready'; files: TestFile[] }
   | { kind: 'error'; message: string };
 
+type RunStatus = 'running' | 'passed' | 'failed';
+type TestStatus = 'idle' | 'running' | 'passed' | 'failed';
+
+interface ActiveRun {
+  runId: string;
+  kind: 'test' | 'all' | 'install';
+  specPath: string | null;
+  title: string;
+  output: string[];
+  status: RunStatus;
+  artifactsDir: string | null;
+  startedAt: number;
+}
+
+interface RunResult {
+  status: 'passed' | 'failed';
+  kind: 'test' | 'all' | 'install';
+  title: string;
+  artifactsDir: string | null;
+  durationMs: number;
+}
+
 @Component({
   selector: 'app-workspace',
   standalone: true,
@@ -67,10 +99,11 @@ type FilesPhase =
   styleUrl: './workspace.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class WorkspaceComponent implements AfterViewChecked {
+export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   private projects = inject(ProjectsStore);
   private envs = inject(EnvironmentsStore);
   private chat = inject(ChatStore);
+  private auth = inject(AuthStore);
   private tauri = inject(TauriBridgeService);
   private notify = inject(NotificationService);
   private router = inject(Router);
@@ -89,6 +122,12 @@ export class WorkspaceComponent implements AfterViewChecked {
   readonly SearchIcon = Search;
   readonly SendIcon = Send;
   readonly TrashIcon = Trash2;
+  readonly PlayIcon = Play;
+  readonly TerminalIcon = Terminal;
+  readonly CheckIcon = CheckCircle2;
+  readonly XIcon = XCircle;
+  readonly ChevronUpIcon = ChevronUp;
+  readonly WarnIcon = AlertTriangle;
 
   id = input.required<string>();
   envId = input.required<string>();
@@ -96,6 +135,7 @@ export class WorkspaceComponent implements AfterViewChecked {
   @ViewChild('envMenu') envMenu?: ElementRef<HTMLElement>;
   @ViewChild('messagesEnd') messagesEnd?: ElementRef<HTMLElement>;
   @ViewChild('chatInput') chatInput?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('outputBox') outputBox?: ElementRef<HTMLElement>;
 
   readonly project = computed(() => {
     const projectId = this.id();
@@ -133,6 +173,41 @@ export class WorkspaceComponent implements AfterViewChecked {
   private dragStartX = 0;
   private dragStartWidth = 0;
 
+  // Cypress runner state
+  readonly cypressInstalled = signal<boolean | null>(null);
+  readonly activeRun = signal<ActiveRun | null>(null);
+  readonly testStatuses = signal<Record<string, TestStatus>>({});
+  readonly outputPanelOpen = signal(false);
+  readonly outputPanelHeight = signal(
+    this.loadWidth('qa-tester:workspace-output-height', 280, 140, 720),
+  );
+  readonly draggingOutput = signal(false);
+  private outputDragStartY = 0;
+  private outputDragStartHeight = 0;
+
+  readonly headedMode = signal(localStorage.getItem('qa-tester:headed') === '1');
+
+  readonly isRunBusy = computed(() => this.activeRun()?.status === 'running');
+  readonly lastResult = signal<RunResult | null>(null);
+  readonly hasOrphanArtifacts = signal(false);
+
+  // Uncommitted tests reminder
+  readonly uncommittedTests = signal<string[]>([]);
+  readonly commitSnoozedUntil = signal<number>(0);
+  readonly now = signal<number>(Date.now());
+  readonly isCommitting = signal(false);
+  readonly showCommitBanner = computed(() => {
+    return (
+      this.uncommittedTests().length > 0 &&
+      this.now() >= this.commitSnoozedUntil()
+    );
+  });
+
+  private activeUnsubs: Array<() => void> = [];
+  private artifactsBaseDir: string | null = null;
+  private commitPollHandle: ReturnType<typeof setInterval> | null = null;
+  private nowTickHandle: ReturnType<typeof setInterval> | null = null;
+
   readonly highlightedCode = computed<SafeHtml | null>(() => {
     const content = this.selectedFileContent();
     const file = this.selectedFile();
@@ -151,6 +226,7 @@ export class WorkspaceComponent implements AfterViewChecked {
   readonly hasMessages = computed(() => this.messages().length > 0);
 
   private shouldScrollToBottom = false;
+  private shouldScrollOutputToBottom = false;
 
   readonly groupedFiles = computed<TestFileGroup[]>(() => {
     const phase = this.filesPhase();
@@ -201,11 +277,67 @@ export class WorkspaceComponent implements AfterViewChecked {
         .catch(() => this.projectInfo.set(null));
     });
 
+    // Check Cypress install state on project load.
+    effect(() => {
+      const p = this.project();
+      if (!p || !this.tauri.isTauri) return;
+      void this.tauri
+        .cypressCheck(p.localPath)
+        .then((s) => this.cypressInstalled.set(s.installed))
+        .catch(() => this.cypressInstalled.set(false));
+    });
+
+    // Resolve home dir once so we can compute the artifacts base path.
+    if (this.tauri.isTauri) {
+      void this.tauri.getHomeDir().then((home) => {
+        this.artifactsBaseDir = `${home}/Documents/QA Tester Artifacts`;
+      });
+    }
+
+    // Detect orphan cypress artifacts left in the repo from earlier runs.
+    effect(() => {
+      const p = this.project();
+      if (!p || !this.tauri.isTauri) return;
+      void this.tauri
+        .checkLocalArtifacts(p.localPath)
+        .then((info) => {
+          this.hasOrphanArtifacts.set(
+            info.has_screenshots || info.has_videos || info.has_downloads,
+          );
+        })
+        .catch(() => undefined);
+    });
+
+    // Initial uncommitted-tests check + periodic poll every 30s.
+    effect(() => {
+      const p = this.project();
+      if (!p || !this.tauri.isTauri) return;
+      void this.refreshUncommittedTests();
+    });
+
+    this.commitPollHandle = setInterval(() => {
+      void this.refreshUncommittedTests();
+    }, 30_000);
+
+    // Tick clock so the snooze-until comparison re-evaluates over time.
+    this.nowTickHandle = setInterval(() => {
+      this.now.set(Date.now());
+    }, 10_000);
+
     // Auto-scroll on new messages or sending state.
     effect(() => {
       this.messages();
       this.isSending();
       this.shouldScrollToBottom = true;
+    });
+
+    // Auto-scroll the output panel as new lines stream in.
+    effect(() => {
+      const run = this.activeRun();
+      if (run) {
+        run.output.length;
+        this.shouldScrollOutputToBottom = true;
+      }
     });
   }
 
@@ -213,6 +345,30 @@ export class WorkspaceComponent implements AfterViewChecked {
     if (this.shouldScrollToBottom && this.messagesEnd) {
       this.messagesEnd.nativeElement.scrollIntoView({ block: 'end' });
       this.shouldScrollToBottom = false;
+    }
+    if (this.shouldScrollOutputToBottom && this.outputBox) {
+      const el = this.outputBox.nativeElement;
+      el.scrollTop = el.scrollHeight;
+      this.shouldScrollOutputToBottom = false;
+    }
+  }
+
+  ngOnDestroy(): void {
+    for (const unsub of this.activeUnsubs) {
+      try {
+        unsub();
+      } catch {
+        // ignore
+      }
+    }
+    this.activeUnsubs = [];
+    if (this.commitPollHandle !== null) {
+      clearInterval(this.commitPollHandle);
+      this.commitPollHandle = null;
+    }
+    if (this.nowTickHandle !== null) {
+      clearInterval(this.nowTickHandle);
+      this.nowTickHandle = null;
     }
   }
 
@@ -296,8 +452,10 @@ export class WorkspaceComponent implements AfterViewChecked {
         role: 'assistant',
         content: reply,
       });
-      // Claude may have created/edited test files. Refresh the list.
+      // Claude may have created/edited test files. Refresh the list AND
+      // the uncommitted-changes check so the commit banner shows up.
       void this.loadTestFiles();
+      void this.refreshUncommittedTests();
     } catch (err) {
       this.notify.error(this.formatError(err));
       this.chat.append(projectId, envId, {
@@ -320,6 +478,347 @@ export class WorkspaceComponent implements AfterViewChecked {
 
   clearChat(): void {
     this.chat.clear(this.id(), this.envId());
+  }
+
+  testStatusFor(file: TestFile): TestStatus {
+    const key = `tests/e2e/${file.relative_path}`;
+    return this.testStatuses()[key] ?? 'idle';
+  }
+
+  private setTestStatus(specPath: string, status: TestStatus): void {
+    this.testStatuses.update((m) => ({ ...m, [specPath]: status }));
+  }
+
+  private newRunId(): string {
+    return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private slugify(s: string): string {
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      || 'unnamed';
+  }
+
+  private timestampForRun(): string {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(
+      d.getHours(),
+    )}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  }
+
+  private artifactsDirFor(envName: string): string | null {
+    const project = this.project();
+    if (!this.artifactsBaseDir || !project) return null;
+    return `${this.artifactsBaseDir}/${this.slugify(project.name)}/${this.slugify(envName)}/${this.timestampForRun()}`;
+  }
+
+  async runTest(file: TestFile, event: Event): Promise<void> {
+    event.stopPropagation();
+    if (this.isRunBusy()) {
+      this.notify.info('Another test is already running.');
+      return;
+    }
+    const p = this.project();
+    const env = this.activeEnv();
+    if (!p || !env) return;
+
+    if (this.cypressInstalled() === false) {
+      const ok = await this.installCypress();
+      if (!ok) return;
+    }
+
+    const specPath = `tests/e2e/${file.relative_path}`;
+    const artifactsDir = this.artifactsDirFor(env.name);
+    await this.startRun({
+      kind: 'test',
+      specPath,
+      title: file.relative_path,
+      artifactsDir,
+      initialLine: `▶ Running ${file.relative_path} against ${env.deployedUrl}${this.headedMode() ? ' (headed)' : ''}`,
+      spawn: (runId) =>
+        this.tauri.cypressRun(
+          p.localPath,
+          runId,
+          env.deployedUrl,
+          specPath,
+          this.headedMode(),
+          artifactsDir,
+        ),
+    });
+  }
+
+  async runAll(): Promise<void> {
+    if (this.isRunBusy()) {
+      this.notify.info('Another run is already in progress.');
+      return;
+    }
+    const p = this.project();
+    const env = this.activeEnv();
+    if (!p || !env) return;
+
+    if (this.cypressInstalled() === false) {
+      const ok = await this.installCypress();
+      if (!ok) return;
+    }
+
+    // Mark all tests as running.
+    const next: Record<string, TestStatus> = {};
+    const phase = this.filesPhase();
+    if (phase.kind === 'ready') {
+      for (const f of phase.files) {
+        next[`tests/e2e/${f.relative_path}`] = 'running';
+      }
+    }
+    this.testStatuses.set(next);
+
+    const artifactsDir = this.artifactsDirFor(env.name);
+    await this.startRun({
+      kind: 'all',
+      specPath: null,
+      title: 'All tests',
+      artifactsDir,
+      initialLine: `▶ Running all tests against ${env.deployedUrl}${this.headedMode() ? ' (headed)' : ''}`,
+      spawn: (runId) =>
+        this.tauri.cypressRun(
+          p.localPath,
+          runId,
+          env.deployedUrl,
+          null,
+          this.headedMode(),
+          artifactsDir,
+        ),
+    });
+  }
+
+  /// Returns true if Cypress is installed after this call.
+  async installCypress(): Promise<boolean> {
+    const p = this.project();
+    if (!p) return false;
+    if (this.isRunBusy()) return false;
+
+    const done = await this.startRun({
+      kind: 'install',
+      specPath: null,
+      title: 'Installing Cypress',
+      artifactsDir: null,
+      initialLine: '▶ Installing Cypress and dependencies (one-time, ~30–60s)',
+      spawn: (runId) => this.tauri.cypressInstall(p.localPath, runId),
+    });
+
+    // After install completes, re-check.
+    try {
+      const status = await this.tauri.cypressCheck(p.localPath);
+      this.cypressInstalled.set(status.installed);
+      return status.installed && done;
+    } catch {
+      return false;
+    }
+  }
+
+  /// Unified run starter — sets up active run, subscribes to events,
+  /// spawns the process, and AWAITS the done event before resolving.
+  /// Returns true on success.
+  private async startRun(opts: {
+    kind: 'test' | 'all' | 'install';
+    specPath: string | null;
+    title: string;
+    artifactsDir: string | null;
+    initialLine: string;
+    spawn: (runId: string) => Promise<void>;
+  }): Promise<boolean> {
+    const runId = this.newRunId();
+    this.activeRun.set({
+      runId,
+      kind: opts.kind,
+      specPath: opts.specPath,
+      title: opts.title,
+      output: [opts.initialLine, ''],
+      status: 'running',
+      artifactsDir: opts.artifactsDir,
+      startedAt: Date.now(),
+    });
+    if (opts.kind === 'test' && opts.specPath) {
+      this.setTestStatus(opts.specPath, 'running');
+    }
+    this.outputPanelOpen.set(true);
+
+    const donePromise = this.subscribeToRun(runId);
+
+    try {
+      await opts.spawn(runId);
+    } catch (err) {
+      this.handleRunError(runId, err);
+      return false;
+    }
+
+    return donePromise;
+  }
+
+  /// Subscribes to streaming + done events for a run. The returned promise
+  /// resolves to true on success (process exited 0) and false on failure.
+  private subscribeToRun(runId: string): Promise<boolean> {
+    return new Promise<boolean>(async (resolve) => {
+      const unsubChunk = await this.tauri.listen<CypressChunk>(
+        `cypress-output:${runId}`,
+        (chunk) => {
+          this.activeRun.update((r) => {
+            if (!r || r.runId !== runId) return r;
+            const next = [...r.output, chunk.line];
+            const trimmed = next.length > 5000 ? next.slice(-5000) : next;
+            return { ...r, output: trimmed };
+          });
+        },
+      );
+      const unsubDone = await this.tauri.listen<CypressDone>(
+        `cypress-done:${runId}`,
+        (done) => {
+          const finalStatus: RunStatus = done.success ? 'passed' : 'failed';
+          this.activeRun.update((r) =>
+            r && r.runId === runId ? { ...r, status: finalStatus } : r,
+          );
+          const run = this.activeRun();
+          if (run?.kind === 'test' && run.specPath) {
+            this.setTestStatus(run.specPath, finalStatus);
+          } else if (run?.kind === 'all') {
+            const next: Record<string, TestStatus> = {};
+            for (const k of Object.keys(this.testStatuses())) {
+              next[k] = finalStatus;
+            }
+            this.testStatuses.set(next);
+          }
+          if (done.error) {
+            this.activeRun.update((r) =>
+              r && r.runId === runId
+                ? { ...r, output: [...r.output, '', `Error: ${done.error}`] }
+                : r,
+            );
+          }
+          // Show post-run result modal for test runs (not install).
+          if (run && run.kind !== 'install') {
+            this.lastResult.set({
+              status: finalStatus,
+              kind: run.kind,
+              title: run.title,
+              artifactsDir: done.artifacts_dir ?? run.artifactsDir,
+              durationMs: Date.now() - run.startedAt,
+            });
+            // A run can update tests/ via Cypress hooks or fixtures — recheck.
+            void this.refreshUncommittedTests();
+          }
+          unsubChunk();
+          unsubDone();
+          this.activeUnsubs = this.activeUnsubs.filter(
+            (fn) => fn !== unsubChunk && fn !== unsubDone,
+          );
+          resolve(done.success);
+        },
+      );
+      this.activeUnsubs.push(unsubChunk, unsubDone);
+    });
+  }
+
+  private handleRunError(runId: string, err: unknown): void {
+    this.activeRun.update((r) =>
+      r && r.runId === runId
+        ? { ...r, status: 'failed', output: [...r.output, '', `Error: ${this.formatError(err)}`] }
+        : r,
+    );
+  }
+
+  async openArtifactsFolder(): Promise<void> {
+    const target =
+      this.lastResult()?.artifactsDir ??
+      this.activeRun()?.artifactsDir ??
+      `${this.project()?.localPath ?? ''}/cypress`;
+    if (!target) return;
+    try {
+      await this.tauri.revealInFinder(target);
+    } catch (err) {
+      this.notify.error(this.formatError(err));
+    }
+  }
+
+  dismissResult(): void {
+    this.lastResult.set(null);
+  }
+
+  async cleanOrphanArtifacts(): Promise<void> {
+    const p = this.project();
+    if (!p) return;
+    try {
+      await this.tauri.cleanLocalArtifacts(p.localPath);
+      this.hasOrphanArtifacts.set(false);
+      this.notify.success('Cleaned up local Cypress artifacts');
+    } catch (err) {
+      this.notify.error(this.formatError(err));
+    }
+  }
+
+  private async refreshUncommittedTests(): Promise<void> {
+    const p = this.project();
+    if (!p || !this.tauri.isTauri) return;
+    try {
+      const files = await this.tauri.testsStatus(p.localPath);
+      this.uncommittedTests.set(files);
+    } catch {
+      // ignore — the banner just won't show
+    }
+  }
+
+  snoozeCommitReminder(): void {
+    // 10 minutes — checked against `now()` which ticks every 10s.
+    this.commitSnoozedUntil.set(Date.now() + 10 * 60 * 1000);
+    this.notify.info("Reminder snoozed — we'll ask again in 10 minutes.");
+  }
+
+  async commitTests(): Promise<void> {
+    const p = this.project();
+    if (!p) return;
+    const files = this.uncommittedTests();
+    if (files.length === 0) return;
+
+    const message = `tests: update ${files.length} file${files.length === 1 ? '' : 's'}`;
+    this.isCommitting.set(true);
+    try {
+      await this.tauri.commitAndPushTests(
+        p.localPath,
+        message,
+        this.auth.token() ?? undefined,
+      );
+      this.uncommittedTests.set([]);
+      this.commitSnoozedUntil.set(0);
+      this.notify.success('Tests pushed to GitHub');
+    } catch (err) {
+      this.notify.error(this.formatError(err));
+    } finally {
+      this.isCommitting.set(false);
+    }
+  }
+
+  formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    const s = Math.round(ms / 100) / 10;
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rem = Math.round(s - m * 60);
+    return `${m}m ${rem}s`;
+  }
+
+  toggleHeaded(): void {
+    this.headedMode.update((v) => !v);
+    localStorage.setItem('qa-tester:headed', this.headedMode() ? '1' : '0');
+  }
+
+  toggleOutputPanel(): void {
+    this.outputPanelOpen.update((v) => !v);
+  }
+
+  closeRun(): void {
+    this.activeRun.set(null);
+    this.outputPanelOpen.set(false);
   }
 
   toggleEnvMenu(): void {
@@ -354,27 +853,49 @@ export class WorkspaceComponent implements AfterViewChecked {
     this.dragStartWidth = side === 'left' ? this.leftWidth() : this.rightWidth();
   }
 
+  startOutputResize(event: MouseEvent): void {
+    event.preventDefault();
+    this.draggingOutput.set(true);
+    this.outputDragStartY = event.clientY;
+    this.outputDragStartHeight = this.outputPanelHeight();
+  }
+
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {
     const side = this.draggingDivider();
-    if (!side) return;
-    const dx = event.clientX - this.dragStartX;
-    if (side === 'left') {
-      const next = this.clamp(this.dragStartWidth + dx, 200, 480);
-      this.leftWidth.set(next);
-    } else {
-      const next = this.clamp(this.dragStartWidth - dx, 240, 720);
-      this.rightWidth.set(next);
+    if (side) {
+      const dx = event.clientX - this.dragStartX;
+      if (side === 'left') {
+        const next = this.clamp(this.dragStartWidth + dx, 200, 480);
+        this.leftWidth.set(next);
+      } else {
+        const next = this.clamp(this.dragStartWidth - dx, 240, 720);
+        this.rightWidth.set(next);
+      }
+      return;
+    }
+    if (this.draggingOutput()) {
+      // Drag the top edge up to grow the panel (negative dy = larger panel).
+      const dy = event.clientY - this.outputDragStartY;
+      const next = this.clamp(this.outputDragStartHeight - dy, 140, 720);
+      this.outputPanelHeight.set(next);
     }
   }
 
   @HostListener('document:mouseup')
   onMouseUp(): void {
-    if (!this.draggingDivider()) return;
-    // Persist on release so we don't thrash localStorage during drag.
-    localStorage.setItem('qa-tester:workspace-left-width', String(this.leftWidth()));
-    localStorage.setItem('qa-tester:workspace-right-width', String(this.rightWidth()));
-    this.draggingDivider.set(null);
+    if (this.draggingDivider()) {
+      localStorage.setItem('qa-tester:workspace-left-width', String(this.leftWidth()));
+      localStorage.setItem('qa-tester:workspace-right-width', String(this.rightWidth()));
+      this.draggingDivider.set(null);
+    }
+    if (this.draggingOutput()) {
+      localStorage.setItem(
+        'qa-tester:workspace-output-height',
+        String(this.outputPanelHeight()),
+      );
+      this.draggingOutput.set(false);
+    }
   }
 
   private clamp(value: number, min: number, max: number): number {

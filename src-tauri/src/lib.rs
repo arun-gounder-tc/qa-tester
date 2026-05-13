@@ -1,5 +1,6 @@
 mod chat;
 mod commands;
+mod cypress;
 mod env_config;
 mod tests_branch;
 mod tests_files;
@@ -30,6 +31,8 @@ pub fn run() {
       tests_branch::checkout_tests_branch,
       tests_branch::bootstrap_tests_branch,
       tests_branch::update_scaffold,
+      tests_branch::tests_status,
+      tests_branch::commit_and_push_tests,
       worktrees::create_env_worktree,
       worktrees::remove_env_worktree,
       worktrees::list_worktrees,
@@ -41,6 +44,11 @@ pub fn run() {
       tests_files::read_test_file,
       chat::chat_available,
       chat::chat_send,
+      cypress::cypress_check,
+      cypress::cypress_install,
+      cypress::cypress_run,
+      cypress::check_local_artifacts,
+      cypress::clean_local_artifacts,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
