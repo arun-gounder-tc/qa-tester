@@ -3,6 +3,99 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Surfaces */
+    --color-surface: 255 255 255;
+    --color-surface-subtle: 250 250 250;
+    --color-surface-muted: 244 244 245;
+    --color-surface-strong: 228 228 231;
+
+    /* Borders */
+    --color-border: 228 228 231;
+    --color-border-subtle: 244 244 245;
+    --color-border-strong: 212 212 216;
+
+    /* Text */
+    --color-content: 24 24 27;
+    --color-content-muted: 82 82 91;
+    --color-content-subtle: 113 113 122;
+    --color-content-disabled: 161 161 170;
+    --color-content-inverse: 255 255 255;
+
+    /* Brand — indigo with violet fade for gradients */
+    --color-brand: 99 102 241;
+    --color-brand-hover: 79 70 229;
+    --color-brand-subtle: 238 242 255;
+    --color-brand-fade: 139 92 246;
+    --color-pink: 236 72 153;
+
+    /* Semantic */
+    --color-success: 16 185 129;
+    --color-success-subtle: 236 253 245;
+    --color-warning: 245 158 11;
+    --color-warning-subtle: 255 251 235;
+    --color-danger: 239 68 68;
+    --color-danger-subtle: 254 242 242;
+
+    /* Env */
+    --color-env-dev: 16 185 129;
+    --color-env-uat: 245 158 11;
+    --color-env-staging: 99 102 241;
+    --color-env-prod: 239 68 68;
+
+    /* Effects */
+    --color-shadow: 0 0 0;
+    --bg-noise-opacity: 0.025;
+
+    color-scheme: light;
+  }
+
+  .dark {
+    /* Surfaces — near-black with depth tiers */
+    --color-surface: 12 12 14;
+    --color-surface-subtle: 7 7 9;
+    --color-surface-muted: 22 22 26;
+    --color-surface-strong: 39 39 42;
+
+    /* Borders — low-contrast for layered look */
+    --color-border: 39 39 42;
+    --color-border-subtle: 26 26 30;
+    --color-border-strong: 63 63 70;
+
+    /* Text */
+    --color-content: 250 250 250;
+    --color-content-muted: 161 161 170;
+    --color-content-subtle: 113 113 122;
+    --color-content-disabled: 82 82 91;
+    --color-content-inverse: 24 24 27;
+
+    /* Brand — brighter in dark for readability + glow */
+    --color-brand: 129 140 248;
+    --color-brand-hover: 165 180 252;
+    --color-brand-subtle: 49 46 129;
+    --color-brand-fade: 167 139 250;
+
+    /* Semantic — slightly desaturated for dark */
+    --color-success: 52 211 153;
+    --color-success-subtle: 6 78 59;
+    --color-warning: 251 191 36;
+    --color-warning-subtle: 120 53 15;
+    --color-danger: 248 113 113;
+    --color-danger-subtle: 127 29 29;
+
+    /* Env */
+    --color-env-dev: 52 211 153;
+    --color-env-uat: 251 191 36;
+    --color-env-staging: 129 140 248;
+    --color-env-prod: 248 113 113;
+
+    /* Effects */
+    --color-shadow: 0 0 0;
+    --bg-noise-opacity: 0.04;
+
+    color-scheme: dark;
+  }
+
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -17,17 +110,23 @@
 
   body {
     @apply bg-surface-subtle text-content font-sans text-base;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+    transition: background-color 200ms ease, color 200ms ease;
   }
 
   *:focus-visible {
-    outline: 2px solid theme('colors.brand.DEFAULT');
+    outline: 2px solid rgb(var(--color-brand) / 0.6);
     outline-offset: 2px;
     border-radius: 4px;
   }
 
   button {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  ::selection {
+    background: rgb(var(--color-brand) / 0.25);
+    color: rgb(var(--color-content));
   }
 }
 
@@ -53,13 +152,97 @@
            text-content-muted hover:text-content hover:bg-surface-muted
            transition-colors;
   }
+
+  /* Brand gradient utilities */
+  .brand-gradient {
+    background: linear-gradient(
+      135deg,
+      rgb(var(--color-brand)) 0%,
+      rgb(var(--color-brand-fade)) 50%,
+      rgb(var(--color-pink)) 100%
+    );
+  }
+
+  .brand-gradient-text {
+    background: linear-gradient(
+      135deg,
+      rgb(var(--color-brand)) 0%,
+      rgb(var(--color-brand-fade)) 60%,
+      rgb(var(--color-pink)) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .brand-gradient-border {
+    position: relative;
+    isolation: isolate;
+  }
+  .brand-gradient-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      rgb(var(--color-brand) / 0.6),
+      rgb(var(--color-brand-fade) / 0.4) 50%,
+      rgb(var(--color-pink) / 0.3)
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  /* Frosted-glass surface (header, dropdowns, modals) */
+  .glass {
+    background: rgb(var(--color-surface) / 0.7);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+
+  /* Pulsing dot — for running state */
+  .pulse-dot {
+    position: relative;
+  }
+  .pulse-dot::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.4;
+    animation: breathe 1.6s ease-in-out infinite;
+    z-index: -1;
+  }
+
+  /* Shimmer skeleton */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--color-surface-muted)) 0%,
+      rgb(var(--color-surface-strong) / 0.6) 50%,
+      rgb(var(--color-surface-muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s linear infinite;
+  }
 }
 
-/* highlight.js theme — must live outside component CSS because the spans
-   are injected via innerHTML and bypass Angular's view encapsulation. */
+/* highlight.js theme — defined in global because innerHTML bypasses
+   Angular's view encapsulation. Both light + dark variants. */
 .code-preview {
-  background: #f6f8fa;
-  color: #24292f;
+  background: rgb(var(--color-surface-muted));
+  color: rgb(var(--color-content));
   line-height: 1.55;
 }
 .code-preview .hljs {
@@ -69,7 +252,7 @@
 }
 .code-preview .hljs-comment,
 .code-preview .hljs-quote {
-  color: #6e7781;
+  color: rgb(var(--color-content-subtle));
   font-style: italic;
 }
 .code-preview .hljs-keyword,
@@ -109,4 +292,43 @@
 }
 .code-preview .hljs-property {
   color: #0550ae;
+}
+
+/* Dark mode override — Tokyo Night-ish */
+.dark .code-preview .hljs-keyword,
+.dark .code-preview .hljs-selector-tag,
+.dark .code-preview .hljs-literal,
+.dark .code-preview .hljs-built_in {
+  color: #f7768e;
+}
+.dark .code-preview .hljs-string,
+.dark .code-preview .hljs-template-string,
+.dark .code-preview .hljs-regexp,
+.dark .code-preview .hljs-attr {
+  color: #9ece6a;
+}
+.dark .code-preview .hljs-number,
+.dark .code-preview .hljs-symbol,
+.dark .code-preview .hljs-bullet,
+.dark .code-preview .hljs-property,
+.dark .code-preview .hljs-type {
+  color: #7dcfff;
+}
+.dark .code-preview .hljs-title,
+.dark .code-preview .hljs-title.function_,
+.dark .code-preview .hljs-section {
+  color: #bb9af7;
+}
+.dark .code-preview .hljs-variable,
+.dark .code-preview .hljs-template-variable,
+.dark .code-preview .hljs-name {
+  color: #e0af68;
+}
+.dark .code-preview .hljs-tag,
+.dark .code-preview .hljs-meta {
+  color: #73daca;
+}
+.dark .code-preview .hljs-comment,
+.dark .code-preview .hljs-quote {
+  color: #565f89;
 }

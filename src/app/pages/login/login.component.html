@@ -2,11 +2,11 @@
   <app-animated-background></app-animated-background>
 
   <div class="relative z-10 w-full max-w-[400px]">
-    <div class="flex flex-col items-center text-center mb-8">
-      <div class="flex items-center justify-center h-12 w-12 rounded-lg bg-content text-content-inverse mb-5 shadow-md">
-        <lucide-icon [img]="LogoIcon" [size]="22"></lucide-icon>
+    <div class="flex flex-col items-center text-center mb-8 animate-fade-in">
+      <div class="flex items-center justify-center h-14 w-14 rounded-xl brand-gradient text-white mb-5 shadow-glow">
+        <lucide-icon [img]="LogoIcon" [size]="26"></lucide-icon>
       </div>
-      <h1 class="text-2xl font-semibold text-content tracking-tight">QA Tester</h1>
+      <h1 class="text-3xl font-bold tracking-tightest brand-gradient-text">QA Tester</h1>
       <p class="text-base text-content-muted mt-1.5">
         @if (phase() === 'waiting') {
           Authorize in browser to continue

@@ -1,5 +1,5 @@
 <div class="h-screen flex flex-col bg-surface-subtle">
-  <header class="bg-surface border-b border-border shrink-0">
+  <header class="glass border-b border-border shrink-0 z-30">
     <div class="px-6 h-14 flex items-center justify-between gap-4">
       <div class="flex items-center gap-3 min-w-0">
         <button
@@ -12,7 +12,7 @@
         </button>
 
         <div class="flex items-center gap-2.5 min-w-0">
-          <div class="flex items-center justify-center h-7 w-7 rounded-md bg-content text-content-inverse shrink-0">
+          <div class="flex items-center justify-center h-7 w-7 rounded-md brand-gradient text-white shadow-glow shrink-0">
             <lucide-icon [img]="LogoIcon" [size]="14"></lucide-icon>
           </div>
           @if (project()) {
@@ -44,7 +44,7 @@
               ></lucide-icon>
             </button>
             @if (isEnvMenuOpen()) {
-              <div class="absolute left-0 top-full mt-1 min-w-[220px] bg-surface border border-border rounded-md shadow-lg overflow-hidden z-10">
+              <div class="absolute left-0 top-full mt-1 min-w-[220px] bg-surface border border-border rounded-lg shadow-soft overflow-hidden z-10 animate-fade-in-scale">
                 <div class="px-3 py-2 text-xs text-content-muted border-b border-border-subtle">
                   Switch environment
                 </div>
@@ -562,11 +562,11 @@
   <!-- Post-run result modal -->
   @if (lastResult(); as r) {
     <div
-      class="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      class="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
       (click)="dismissResult()"
     >
       <div
-        class="bg-surface rounded-lg shadow-xl max-w-md w-full overflow-hidden"
+        class="bg-surface border border-border rounded-xl shadow-soft max-w-md w-full overflow-hidden animate-fade-in-scale"
         (click)="$event.stopPropagation()"
       >
         <div class="p-6">

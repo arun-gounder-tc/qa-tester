@@ -23,7 +23,7 @@
 
     @if (isOpen()) {
       <div
-        class="absolute right-0 mt-2 w-64 origin-top-right card shadow-lg overflow-hidden z-50"
+        class="absolute right-0 mt-2 w-64 origin-top-right bg-surface border border-border rounded-lg shadow-soft overflow-hidden z-50 animate-fade-in-scale"
         role="menu"
       >
         <div class="px-3 py-3 flex items-center gap-3 border-b border-border">
@@ -67,6 +67,51 @@
           >
             <lucide-icon [img]="SettingsIcon" [size]="15" class="text-content-muted"></lucide-icon>
             <span>Settings</span>
+          </button>
+        </div>
+
+        <div class="py-1 border-t border-border">
+          <p class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider font-semibold text-content-disabled">
+            Appearance
+          </p>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-content hover:bg-surface-muted transition-colors text-left"
+            role="menuitemradio"
+            [attr.aria-checked]="themeMode() === 'light'"
+            (click)="setTheme('light')"
+          >
+            <lucide-icon [img]="SunIcon" [size]="15" class="text-content-muted"></lucide-icon>
+            <span class="flex-1">Light</span>
+            @if (themeMode() === 'light') {
+              <lucide-icon [img]="CheckIcon" [size]="13" class="text-brand"></lucide-icon>
+            }
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-content hover:bg-surface-muted transition-colors text-left"
+            role="menuitemradio"
+            [attr.aria-checked]="themeMode() === 'dark'"
+            (click)="setTheme('dark')"
+          >
+            <lucide-icon [img]="MoonIcon" [size]="15" class="text-content-muted"></lucide-icon>
+            <span class="flex-1">Dark</span>
+            @if (themeMode() === 'dark') {
+              <lucide-icon [img]="CheckIcon" [size]="13" class="text-brand"></lucide-icon>
+            }
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-content hover:bg-surface-muted transition-colors text-left"
+            role="menuitemradio"
+            [attr.aria-checked]="themeMode() === 'system'"
+            (click)="setTheme('system')"
+          >
+            <lucide-icon [img]="MonitorIcon" [size]="15" class="text-content-muted"></lucide-icon>
+            <span class="flex-1">System</span>
+            @if (themeMode() === 'system') {
+              <lucide-icon [img]="CheckIcon" [size]="13" class="text-brand"></lucide-icon>
+            }
           </button>
         </div>
 

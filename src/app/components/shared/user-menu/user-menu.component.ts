@@ -9,14 +9,19 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import {
+  Check,
   ExternalLink,
   LogOut,
   LucideAngularModule,
+  Monitor,
+  Moon,
   Settings,
+  Sun,
   User,
 } from 'lucide-angular';
 import { TauriBridgeService } from '../../../services/api/tauri-bridge.service';
 import { AuthStore } from '../../../services/state/auth.store';
+import { ThemeMode, ThemeStore } from '../../../services/state/theme.store';
 
 @Component({
   selector: 'app-user-menu',
@@ -29,6 +34,7 @@ import { AuthStore } from '../../../services/state/auth.store';
 export class UserMenuComponent {
   private auth = inject(AuthStore);
   private tauri = inject(TauriBridgeService);
+  private theme = inject(ThemeStore);
   private router = inject(Router);
   private host = inject(ElementRef<HTMLElement>);
 
@@ -36,9 +42,18 @@ export class UserMenuComponent {
   readonly SettingsIcon = Settings;
   readonly ExternalIcon = ExternalLink;
   readonly LogOutIcon = LogOut;
+  readonly SunIcon = Sun;
+  readonly MoonIcon = Moon;
+  readonly MonitorIcon = Monitor;
+  readonly CheckIcon = Check;
 
   readonly user = this.auth.user;
   readonly isOpen = signal(false);
+  readonly themeMode = this.theme.mode;
+
+  setTheme(mode: ThemeMode): void {
+    this.theme.setMode(mode);
+  }
 
   readonly initials = computed(() => {
     const u = this.user();
