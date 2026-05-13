@@ -1,0 +1,135 @@
+<div class="relative min-h-screen flex items-center justify-center p-6 overflow-hidden">
+  <app-animated-background></app-animated-background>
+
+  <div class="relative z-10 w-full max-w-[400px]">
+    <div class="flex flex-col items-center text-center mb-8">
+      <div class="flex items-center justify-center h-12 w-12 rounded-lg bg-content text-content-inverse mb-5 shadow-md">
+        <lucide-icon [img]="LogoIcon" [size]="22"></lucide-icon>
+      </div>
+      <h1 class="text-2xl font-semibold text-content tracking-tight">QA Tester</h1>
+      <p class="text-base text-content-muted mt-1.5">
+        @if (phase() === 'waiting') {
+          Authorize in browser to continue
+        } @else {
+          Sign in with GitHub to begin
+        }
+      </p>
+    </div>
+
+    <div class="card p-5 backdrop-blur-sm bg-surface/80 shadow-lg">
+      @switch (phase()) {
+        @case ('success') {
+          <div class="flex flex-col items-center text-center py-4 anim-fade-in">
+            <div class="relative flex items-center justify-center h-16 w-16 mb-4">
+              <span class="absolute inset-0 rounded-full bg-success/15 anim-pulse-ring"></span>
+              <span class="relative inline-flex items-center justify-center h-14 w-14 rounded-full bg-success text-content-inverse anim-pop-in">
+                <lucide-icon [img]="CheckCircleIcon" [size]="28"></lucide-icon>
+              </span>
+            </div>
+            <h3 class="text-base font-semibold text-content tracking-tight">
+              Signed in successfully
+            </h3>
+            <p class="text-sm text-content-muted mt-1">
+              Welcome, {{ successName() }}
+            </p>
+            <div class="mt-4 flex items-center gap-1.5 text-xs text-content-subtle">
+              <span class="inline-block h-1 w-1 rounded-full bg-content-subtle anim-bounce-dot" style="animation-delay: 0s"></span>
+              <span class="inline-block h-1 w-1 rounded-full bg-content-subtle anim-bounce-dot" style="animation-delay: 0.15s"></span>
+              <span class="inline-block h-1 w-1 rounded-full bg-content-subtle anim-bounce-dot" style="animation-delay: 0.3s"></span>
+              <span class="ml-1">Taking you in</span>
+            </div>
+          </div>
+        }
+        @case ('waiting') {
+          @if (deviceCode(); as code) {
+            <div class="space-y-4">
+              <p class="text-sm text-content-muted">
+                Enter this code in your browser:
+              </p>
+
+              <div class="flex items-stretch gap-2">
+                <div class="flex-1 flex items-center justify-center bg-surface-muted border border-border rounded font-mono text-xl font-semibold text-content tracking-[0.2em] h-12">
+                  {{ userCodeDisplay() }}
+                </div>
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center w-12 rounded border border-border bg-surface text-content-muted hover:bg-surface-muted hover:text-content transition-colors"
+                  [attr.aria-label]="codeCopied() ? 'Copied' : 'Copy code'"
+                  (click)="copyCode()"
+                >
+                  <lucide-icon [img]="CopyIcon" [size]="15"></lucide-icon>
+                </button>
+              </div>
+
+              @if (codeCopied()) {
+                <p class="text-xs text-success text-center -mt-2">Copied to clipboard</p>
+              }
+
+              <div class="flex items-center gap-2 text-xs text-content-muted">
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-brand animate-pulse"></span>
+                <span>Waiting for authorization…</span>
+              </div>
+
+              <div class="flex flex-col gap-2 pt-1">
+                <app-button
+                  variant="secondary"
+                  size="md"
+                  [fullWidth]="true"
+                  (clicked)="openBrowserAgain()"
+                >
+                  <lucide-icon [img]="ExternalIcon" [size]="14"></lucide-icon>
+                  Open browser again
+                </app-button>
+                <app-button
+                  variant="ghost"
+                  size="md"
+                  [fullWidth]="true"
+                  (clicked)="cancel()"
+                >
+                  Cancel
+                </app-button>
+              </div>
+            </div>
+          }
+        }
+        @default {
+          <div class="space-y-4">
+            @if (errorMsg()) {
+              <div class="text-xs text-danger bg-danger-subtle border border-danger/20 rounded px-3 py-2">
+                {{ errorMsg() }}
+              </div>
+            }
+
+            @if (!isTauri) {
+              <div class="text-xs text-warning bg-warning-subtle border border-warning/20 rounded px-3 py-2">
+                Sign-in requires the desktop app. Run <code class="font-mono">npm run tauri:dev</code>.
+              </div>
+            }
+
+            <app-button
+              variant="primary"
+              size="lg"
+              [fullWidth]="true"
+              [loading]="phase() === 'requesting'"
+              [disabled]="!isTauri"
+              (clicked)="onSignIn()"
+            >
+              @if (phase() !== 'requesting') {
+                <lucide-icon [img]="GithubIcon" [size]="16"></lucide-icon>
+              }
+              <span>
+                {{ phase() === 'requesting' ? 'Connecting…' : 'Continue with GitHub' }}
+              </span>
+            </app-button>
+
+            <p class="text-xs text-content-subtle text-center">
+              We'll open GitHub in your browser to authorize.
+            </p>
+          </div>
+        }
+      }
+    </div>
+
+    <p class="text-xs text-content-disabled text-center mt-6">v0.1.0</p>
+  </div>
+</div>

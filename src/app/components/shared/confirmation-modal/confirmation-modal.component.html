@@ -1,0 +1,70 @@
+<app-modal
+  [open]="open()"
+  [closable]="false"
+  size="md"
+  (closed)="onCancel()"
+>
+  <div class="space-y-4">
+    <div [class]="iconWrapClass()">
+      <lucide-icon [img]="iconImg()" [size]="18"></lucide-icon>
+    </div>
+
+    <div>
+      <h2 class="text-base font-semibold text-content tracking-tight">
+        {{ config().title }}
+      </h2>
+      <p class="text-sm text-content-muted mt-1.5 leading-relaxed">
+        {{ config().message }}
+      </p>
+    </div>
+
+    @if (config().details && config().details!.length > 0) {
+      <ul class="bg-surface-muted rounded-md p-3 space-y-1.5">
+        @for (detail of config().details!; track detail) {
+          <li class="text-sm text-content-muted flex items-start gap-2">
+            <span class="text-content-disabled mt-0.5">•</span>
+            <span class="flex-1 break-all">{{ detail }}</span>
+          </li>
+        }
+      </ul>
+    }
+
+    @if (config().warningNote) {
+      <div class="flex items-start gap-2.5 bg-warning-subtle border border-warning/20 rounded-md p-3">
+        <lucide-icon
+          [img]="warningIcon"
+          [size]="16"
+          class="text-warning mt-0.5 shrink-0"
+        ></lucide-icon>
+        <p class="text-sm text-content leading-snug">{{ config().warningNote }}</p>
+      </div>
+    }
+
+    @if (config().requireTyping) {
+      <div>
+        <label class="label-base">
+          Confirm karne ke liye <code class="px-1 py-0.5 bg-surface-muted rounded text-xs font-mono">{{ config().requireTyping }}</code> type karo
+        </label>
+        <input
+          type="text"
+          class="input-base"
+          [value]="confirmInput()"
+          (input)="onTypingChange($any($event.target).value)"
+        />
+      </div>
+    }
+
+    <div class="flex gap-2 justify-end pt-2">
+      <app-button variant="secondary" (clicked)="onCancel()">
+        {{ config().cancelText ?? 'Cancel' }}
+      </app-button>
+      <app-button
+        [variant]="buttonVariant()"
+        [disabled]="!canConfirm()"
+        (clicked)="onConfirm()"
+      >
+        {{ config().confirmText }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

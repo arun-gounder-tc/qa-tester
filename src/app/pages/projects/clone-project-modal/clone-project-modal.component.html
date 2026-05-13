@@ -1,0 +1,289 @@
+<app-modal
+  [open]="open()"
+  title="Add Project"
+  description="Clone a repository from GitHub or paste a URL."
+  size="xl"
+  (closed)="onCancel()"
+>
+  @if (!isTauri) {
+    <div class="text-xs text-warning bg-warning-subtle border border-warning/20 rounded px-3 py-2 mb-4">
+      Cloning requires the desktop app. Run <code class="font-mono">npm run tauri:dev</code> to enable.
+    </div>
+  }
+
+  @if (conflict()) {
+    <div class="space-y-3">
+      <div class="text-sm text-content">
+        <p class="font-medium mb-1">This project is already cloned.</p>
+        <p class="text-content-muted text-xs">
+          Found a git repository at <code class="font-mono break-all">{{ conflict()!.targetPath }}</code>
+          @if (conflict()!.remoteUrl) {
+            with remote <code class="font-mono break-all">{{ conflict()!.remoteUrl }}</code>.
+          } @else { . }
+        </p>
+      </div>
+      <div class="flex justify-end gap-2 pt-1">
+        <app-button variant="secondary" (clicked)="onDismissConflict()">
+          Change path
+        </app-button>
+        <app-button variant="primary" (clicked)="onAddExisting()">
+          Add as existing
+        </app-button>
+      </div>
+    </div>
+  } @else {
+    <div class="space-y-4">
+      <div class="inline-flex bg-surface-muted rounded p-0.5 text-xs">
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded transition-colors font-medium"
+          [class.bg-surface]="tab() === 'browse'"
+          [class.text-content]="tab() === 'browse'"
+          [class.shadow-xs]="tab() === 'browse'"
+          [class.text-content-muted]="tab() !== 'browse'"
+          (click)="setTab('browse')"
+        >
+          Your repositories
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded transition-colors font-medium"
+          [class.bg-surface]="tab() === 'url'"
+          [class.text-content]="tab() === 'url'"
+          [class.shadow-xs]="tab() === 'url'"
+          [class.text-content-muted]="tab() !== 'url'"
+          (click)="setTab('url')"
+        >
+          Clone from URL
+        </button>
+      </div>
+
+      @if (tab() === 'browse') {
+        <div>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <lucide-icon
+                [img]="SearchIcon"
+                [size]="14"
+                class="absolute left-2.5 top-1/2 -translate-y-1/2 text-content-disabled pointer-events-none"
+              ></lucide-icon>
+              <input
+                type="text"
+                class="input-base pl-8"
+                placeholder="Search repositories…"
+                [value]="searchQuery()"
+                (input)="onSearchChange($any($event.target).value)"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center justify-center h-9 px-3 rounded border border-border bg-surface text-content-muted hover:bg-surface-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+              [disabled]="reposLoading()"
+              (click)="refreshRepos()"
+              aria-label="Refresh repositories"
+              title="Refresh repositories"
+            >
+              <lucide-icon
+                [img]="RefreshIcon"
+                [size]="14"
+                [class.animate-spin]="reposLoading()"
+              ></lucide-icon>
+            </button>
+          </div>
+
+          <div class="mt-3 border border-border rounded-md max-h-64 overflow-y-auto bg-surface">
+            @if (reposLoading()) {
+              <div class="px-3 py-8 text-center text-sm text-content-muted">
+                Loading your repositories…
+              </div>
+            } @else if (reposError()) {
+              <div class="px-3 py-8 text-center">
+                <p class="text-sm text-danger mb-2">{{ reposError() }}</p>
+                <button
+                  type="button"
+                  class="text-xs text-content-muted hover:text-content underline"
+                  (click)="loadRepos()"
+                >
+                  Try again
+                </button>
+              </div>
+            } @else if (filteredGroups().length === 0) {
+              <div class="px-3 py-8 text-center text-sm text-content-muted">
+                @if (searchQuery()) {
+                  No matches for "{{ searchQuery() }}"
+                } @else {
+                  No repositories accessible.
+                }
+              </div>
+            } @else {
+              <ul class="divide-y divide-border">
+                @for (group of filteredGroups(); track group.owner) {
+                  <li>
+                    <button
+                      type="button"
+                      class="w-full flex items-center gap-2 px-3 py-2 hover:bg-surface-muted transition-colors text-left"
+                      (click)="toggleOwner(group.owner)"
+                    >
+                      <lucide-icon
+                        [img]="isOwnerExpanded(group.owner) ? ChevronDownIcon : ChevronRightIcon"
+                        [size]="13"
+                        class="text-content-muted shrink-0"
+                      ></lucide-icon>
+                      <img
+                        [src]="group.avatarUrl"
+                        [alt]="group.owner"
+                        class="h-5 w-5 rounded shrink-0"
+                        referrerpolicy="no-referrer"
+                      />
+                      <span class="text-sm font-medium text-content truncate flex-1">
+                        {{ group.owner }}
+                      </span>
+                      <span class="text-xs text-content-subtle shrink-0">
+                        {{ group.repos.length }}
+                      </span>
+                      <lucide-icon
+                        [img]="group.ownerType === 'Organization' ? OrgIcon : UserIcon"
+                        [size]="12"
+                        class="text-content-disabled shrink-0"
+                      ></lucide-icon>
+                    </button>
+
+                    @if (isOwnerExpanded(group.owner)) {
+                      <ul class="pb-1">
+                        @for (repo of group.repos; track repo.id) {
+                          <li>
+                            <button
+                              type="button"
+                              class="w-full flex items-start gap-2 pl-10 pr-3 py-2 transition-colors text-left"
+                              [class.bg-brand-subtle]="selectedRepoId() === repo.id"
+                              [class.hover:bg-surface-muted]="selectedRepoId() !== repo.id"
+                              (click)="selectRepo(repo)"
+                            >
+                              <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-1.5">
+                                  <span class="text-sm text-content font-medium truncate">
+                                    {{ repo.name }}
+                                  </span>
+                                  @if (repo.private) {
+                                    <lucide-icon
+                                      [img]="LockIcon"
+                                      [size]="11"
+                                      class="text-content-disabled shrink-0"
+                                    ></lucide-icon>
+                                  }
+                                  @if (repo.archived) {
+                                    <span class="text-[10px] font-medium uppercase tracking-wide text-warning bg-warning-subtle px-1 py-0.5 rounded">
+                                      Archived
+                                    </span>
+                                  }
+                                </div>
+                                @if (repo.description) {
+                                  <p class="text-xs text-content-subtle truncate mt-0.5">
+                                    {{ repo.description }}
+                                  </p>
+                                }
+                              </div>
+                            </button>
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        </div>
+      } @else {
+        <div>
+          <label class="label-base" for="repo-url">Repository URL</label>
+          <input
+            id="repo-url"
+            type="text"
+            class="input-base"
+            placeholder="https://github.com/org/repo"
+            [value]="repoUrl()"
+            (input)="onUrlChange($any($event.target).value)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="text-xs text-content-subtle mt-1.5">
+            Paste any GitHub repository URL you have access to.
+          </p>
+        </div>
+      }
+
+      <div class="border-t border-border pt-4 space-y-4">
+        <div>
+          <label class="label-base" for="local-path">Local location</label>
+          <div class="flex gap-2">
+            <input
+              id="local-path"
+              type="text"
+              class="input-base flex-1"
+              placeholder="/Users/you/Projects"
+              [value]="localPath()"
+              (input)="onPathChange($any($event.target).value)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              type="button"
+              class="inline-flex items-center justify-center h-9 px-3 rounded border border-border bg-surface text-content-muted hover:bg-surface-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+              [disabled]="isBrowsing()"
+              (click)="onBrowse()"
+              aria-label="Choose folder"
+            >
+              @if (isBrowsing()) {
+                <span class="inline-block h-3.5 w-3.5 border-2 border-current border-r-transparent rounded-full animate-spin"></span>
+              } @else {
+                <lucide-icon [img]="FolderIcon" [size]="15"></lucide-icon>
+              }
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label class="label-base" for="folder-name">Folder name</label>
+          <input
+            id="folder-name"
+            type="text"
+            class="input-base"
+            placeholder="my-project"
+            [value]="folderName()"
+            (input)="onFolderChange($any($event.target).value)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          @if (targetPath()) {
+            <div class="mt-1.5 truncate">
+              <app-path-breadcrumbs [path]="targetPath()"></app-path-breadcrumbs>
+            </div>
+          }
+        </div>
+
+        @if (errorMsg()) {
+          <div class="text-xs text-danger bg-danger-subtle border border-danger/20 rounded px-3 py-2">
+            {{ errorMsg() }}
+          </div>
+        }
+
+        <div class="flex justify-end gap-2">
+          <app-button variant="secondary" (clicked)="onCancel()">
+            Cancel
+          </app-button>
+          <app-button
+            variant="primary"
+            [disabled]="!canSubmit()"
+            [loading]="isCloning()"
+            (clicked)="onSubmit()"
+          >
+            {{ isCloning() ? 'Cloning…' : 'Clone' }}
+          </app-button>
+        </div>
+      </div>
+    </div>
+  }
+</app-modal>

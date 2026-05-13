@@ -1,0 +1,262 @@
+<div class="min-h-screen bg-surface-subtle">
+  <header class="bg-surface border-b border-border">
+    <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="flex items-center justify-center h-7 w-7 rounded-md bg-content text-content-inverse">
+          <lucide-icon [img]="LogoIcon" [size]="14"></lucide-icon>
+        </div>
+        <span class="text-base font-semibold text-content tracking-tight">QA Tester</span>
+      </div>
+
+      <app-user-menu></app-user-menu>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-8">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1.5 text-sm text-content-muted hover:text-content transition-colors mb-5"
+      (click)="goBack()"
+    >
+      <lucide-icon [img]="BackIcon" [size]="14"></lucide-icon>
+      Projects
+    </button>
+
+    @if (project()) {
+      <div class="mb-8">
+        <div class="flex items-center gap-3">
+          <h1 class="text-2xl font-semibold text-content tracking-tight">
+            {{ project()!.name }}
+          </h1>
+          @if (projectInfo(); as info) {
+            @if (info.kind !== 'unknown') {
+              <span class="inline-flex items-center gap-1.5 px-2 h-6 rounded-md bg-surface-muted text-xs font-medium text-content-muted">
+                {{ info.framework ?? (info.kind === 'fullstack' ? 'Fullstack' : info.kind === 'backend' ? 'Backend' : 'Frontend') }}
+              </span>
+            }
+          }
+        </div>
+        <div class="mt-1.5 space-y-1">
+          <p class="text-xs text-content-muted font-mono truncate">
+            {{ project()!.remoteUrl }}
+          </p>
+          <app-path-breadcrumbs [path]="project()!.localPath"></app-path-breadcrumbs>
+        </div>
+      </div>
+
+      @switch (branchPhase().kind) {
+        @case ('checking') {
+          <div class="card p-4 mb-6 flex items-center gap-3">
+            <lucide-icon [img]="LoaderIcon" [size]="16" class="text-content-muted animate-spin"></lucide-icon>
+            <p class="text-sm text-content-muted">Checking tests branch…</p>
+          </div>
+        }
+        @case ('needs-action') {
+          @let phase = branchPhase();
+          @if (phase.kind === 'needs-action') {
+            @let copy = bannerCopy(phase.status);
+            <div class="card border-brand/30 bg-brand-subtle/40 p-5 mb-6">
+              <div class="flex items-start gap-3">
+                <div class="flex items-center justify-center h-9 w-9 rounded-md bg-surface text-brand shrink-0">
+                  <lucide-icon [img]="SparklesIcon" [size]="18"></lucide-icon>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-sm font-semibold text-content tracking-tight">
+                    {{ copy.title }}
+                  </h3>
+                  <p class="text-sm text-content-muted mt-1 leading-relaxed">
+                    {{ copy.message }}
+                  </p>
+                  <div class="mt-3">
+                    <app-button variant="primary" size="sm" (clicked)="initializeTestsBranch()">
+                      {{ copy.cta }}
+                    </app-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
+        }
+        @case ('working') {
+          @let phase = branchPhase();
+          @if (phase.kind === 'working') {
+            <div class="card p-4 mb-6 flex items-center gap-3">
+              <lucide-icon [img]="LoaderIcon" [size]="16" class="text-brand animate-spin"></lucide-icon>
+              <p class="text-sm text-content">{{ phase.message }}</p>
+            </div>
+          }
+        }
+        @case ('error') {
+          @let phase = branchPhase();
+          @if (phase.kind === 'error') {
+            <div class="card border-danger/30 bg-danger-subtle/40 p-4 mb-6">
+              <p class="text-sm text-content mb-2">
+                <span class="font-medium text-danger">Tests branch error.</span>
+                {{ phase.message }}
+              </p>
+              <button
+                type="button"
+                class="text-xs text-content-muted hover:text-content underline"
+                (click)="retryCheck()"
+              >
+                Try again
+              </button>
+            </div>
+          }
+        }
+      }
+
+      <section>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-content tracking-tight">
+              Environments
+            </h2>
+            <p class="text-xs text-content-muted mt-0.5">
+              @if (hasEnvironments()) {
+                {{ environments().length }} configured
+              } @else {
+                Setup deployments to start testing
+              }
+            </p>
+          </div>
+          @if (hasEnvironments()) {
+            <app-button
+              variant="primary"
+              size="sm"
+              [disabled]="!isTestsBranchReady()"
+              (clicked)="openCreateModal()"
+            >
+              <lucide-icon [img]="PlusIcon" [size]="13"></lucide-icon>
+              New Environment
+            </app-button>
+          }
+        </div>
+
+        @if (!hasEnvironments()) {
+          <div class="card p-10 text-center">
+            <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface-muted text-content-muted mb-4">
+              <lucide-icon [img]="LayersIcon" [size]="22"></lucide-icon>
+            </div>
+            <h3 class="text-base font-semibold text-content tracking-tight">
+              No environments yet
+            </h3>
+            <p class="text-sm text-content-muted mt-1.5 max-w-sm mx-auto">
+              Add a deployment target (dev, uat, prod) to start creating tests for it.
+            </p>
+            <div class="mt-6">
+              <app-button
+                variant="primary"
+                [disabled]="!isTestsBranchReady()"
+                (clicked)="openCreateModal()"
+              >
+                <lucide-icon [img]="PlusIcon" [size]="14"></lucide-icon>
+                Create Environment
+              </app-button>
+            </div>
+          </div>
+        } @else {
+          <ul class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            @for (env of environments(); track env.id) {
+              @let wtStatus = worktreeStatusFor(env.id);
+              <li>
+                <div
+                  role="button"
+                  tabindex="0"
+                  class="card p-4 hover:border-border-strong hover:bg-surface transition-colors text-left group cursor-pointer"
+                  (click)="openEnvironment(env)"
+                  (keydown.enter)="openEnvironment(env)"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <span
+                        [class]="badgeColor(env.color) + ' h-2 w-2 rounded-full shrink-0'"
+                        aria-hidden="true"
+                      ></span>
+                      <h3 class="text-sm font-semibold text-content truncate">
+                        {{ env.name }}
+                      </h3>
+                    </div>
+                    <lucide-icon
+                      [img]="ChevronIcon"
+                      [size]="15"
+                      class="text-content-disabled group-hover:text-content-muted shrink-0 transition-colors"
+                    ></lucide-icon>
+                  </div>
+
+                  <div class="mt-3 space-y-1.5">
+                    <div class="flex items-center gap-2 text-xs text-content-muted min-w-0">
+                      <lucide-icon [img]="GlobeIcon" [size]="12" class="shrink-0"></lucide-icon>
+                      <span class="truncate font-mono">{{ env.deployedUrl }}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-content-muted">
+                      <lucide-icon [img]="BranchIcon" [size]="12" class="shrink-0"></lucide-icon>
+                      <span class="font-mono">{{ env.codeBranch }}</span>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 pt-3 border-t border-border-subtle flex items-center justify-between gap-2 min-h-[24px]">
+                    @switch (wtStatus) {
+                      @case ('preparing') {
+                        <span class="flex items-center gap-1.5 text-xs text-content-muted">
+                          <lucide-icon [img]="LoaderIcon" [size]="11" class="animate-spin"></lucide-icon>
+                          Preparing workspace…
+                        </span>
+                      }
+                      @case ('ready') {
+                        <span class="flex items-center gap-1.5 text-xs text-success">
+                          <lucide-icon [img]="CheckIcon" [size]="11"></lucide-icon>
+                          Workspace ready
+                        </span>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 text-xs text-content-muted hover:text-content transition-colors"
+                          (click)="openEnvFolder(env, $event)"
+                          title="Open folder"
+                        >
+                          <lucide-icon [img]="FolderIcon" [size]="12"></lucide-icon>
+                          Open folder
+                        </button>
+                      }
+                      @case ('failed') {
+                        <span class="flex items-center gap-1.5 text-xs text-danger">
+                          <lucide-icon [img]="WarnIcon" [size]="11"></lucide-icon>
+                          Workspace setup failed
+                        </span>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 text-xs text-content-muted hover:text-content transition-colors"
+                          (click)="retryWorktree(env, $event)"
+                        >
+                          <lucide-icon [img]="RetryIcon" [size]="12"></lucide-icon>
+                          Retry
+                        </button>
+                      }
+                      @default {
+                        <span class="flex items-center gap-1.5 text-xs text-content-disabled">
+                          <span class="h-1.5 w-1.5 rounded-full bg-content-disabled"></span>
+                          Workspace pending
+                        </span>
+                      }
+                    }
+                  </div>
+                </div>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    } @else {
+      <div class="card p-10 text-center">
+        <p class="text-sm text-content-muted">Project not found.</p>
+      </div>
+    }
+  </main>
+</div>
+
+<app-create-environment-modal
+  [open]="isCreateModalOpen()"
+  [remoteUrl]="project()?.remoteUrl ?? ''"
+  (closed)="closeCreateModal()"
+  (created)="onEnvCreated($event)"
+></app-create-environment-modal>

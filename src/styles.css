@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-surface-subtle text-content font-sans text-base;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  *:focus-visible {
+    outline: 2px solid theme('colors.brand.DEFAULT');
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-lg;
+  }
+
+  .input-base {
+    @apply w-full h-9 px-3 text-base bg-surface border border-border rounded
+           text-content placeholder:text-content-disabled
+           focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand
+           disabled:bg-surface-muted disabled:cursor-not-allowed
+           transition-colors;
+  }
+
+  .label-base {
+    @apply block text-xs font-medium text-content-muted mb-1.5;
+  }
+
+  .icon-btn {
+    @apply inline-flex items-center justify-center w-8 h-8 rounded
+           text-content-muted hover:text-content hover:bg-surface-muted
+           transition-colors;
+  }
+}

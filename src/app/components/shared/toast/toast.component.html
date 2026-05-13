@@ -1,0 +1,24 @@
+<div
+  class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80"
+  role="region"
+  aria-label="Notifications"
+>
+  @for (toast of toasts(); track toast.id) {
+    <div [class]="containerClass(toast)" role="status">
+      <lucide-icon
+        [img]="$any(iconFor(toast))"
+        [size]="16"
+        [class]="iconColor(toast) + ' mt-0.5 shrink-0'"
+      ></lucide-icon>
+      <p class="flex-1 text-sm text-content leading-snug">{{ toast.message }}</p>
+      <button
+        type="button"
+        class="icon-btn h-6 w-6 shrink-0"
+        (click)="dismiss(toast.id)"
+        aria-label="Dismiss notification"
+      >
+        <lucide-icon [img]="XIcon" [size]="14"></lucide-icon>
+      </button>
+    </div>
+  }
+</div>

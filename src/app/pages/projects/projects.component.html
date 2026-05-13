@@ -1,0 +1,131 @@
+<div class="min-h-screen bg-surface-subtle">
+  <header class="bg-surface border-b border-border">
+    <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="flex items-center justify-center h-7 w-7 rounded-md bg-content text-content-inverse">
+          <lucide-icon [img]="LogoIcon" [size]="14"></lucide-icon>
+        </div>
+        <span class="text-base font-semibold text-content tracking-tight">QA Tester</span>
+      </div>
+
+      <app-user-menu></app-user-menu>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-10">
+    @if (!hasProjects()) {
+      <div class="card p-10 text-center">
+        <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface-muted text-content-muted mb-4">
+          <lucide-icon [img]="FolderIcon" [size]="22"></lucide-icon>
+        </div>
+        <h2 class="text-lg font-semibold text-content tracking-tight">
+          No projects yet
+        </h2>
+        <p class="text-sm text-content-muted mt-1.5 max-w-sm mx-auto">
+          Clone a repository to begin creating automated tests with AI.
+        </p>
+        <div class="mt-6">
+          <app-button variant="primary" (clicked)="openCloneModal()">
+            <lucide-icon [img]="PlusIcon" [size]="14"></lucide-icon>
+            Add Project
+          </app-button>
+        </div>
+      </div>
+    } @else {
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h2 class="text-xl font-semibold text-content tracking-tight">Projects</h2>
+          <p class="text-sm text-content-muted mt-0.5">
+            {{ projectList().length }} {{ projectList().length === 1 ? 'repository' : 'repositories' }}
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Refresh project status"
+            title="Refresh status"
+            (click)="refreshStatuses()"
+          >
+            <lucide-icon [img]="RefreshIcon" [size]="14"></lucide-icon>
+          </button>
+          <app-button variant="primary" (clicked)="openCloneModal()">
+            <lucide-icon [img]="PlusIcon" [size]="14"></lucide-icon>
+            Add Project
+          </app-button>
+        </div>
+      </div>
+
+      <ul class="card divide-y divide-border overflow-hidden">
+        @for (project of projectList(); track project.id) {
+          <li>
+            <div
+              class="group w-full flex items-center gap-3 px-4 py-3 hover:bg-surface-muted transition-colors cursor-pointer"
+              (click)="openProject(project)"
+            >
+              <div class="flex items-center justify-center h-8 w-8 rounded-md bg-surface-muted text-content-muted shrink-0 relative">
+                <lucide-icon [img]="FolderIcon" [size]="15"></lucide-icon>
+                @if (project.status === 'missing' || project.status === 'not-git') {
+                  <span
+                    class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-warning border-2 border-surface"
+                    aria-hidden="true"
+                  ></span>
+                }
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-content truncate">
+                    {{ project.name }}
+                  </p>
+                  @if (project.status === 'missing') {
+                    <span class="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-warning bg-warning-subtle px-1.5 py-0.5 rounded">
+                      <lucide-icon [img]="WarnIcon" [size]="10"></lucide-icon>
+                      Missing
+                    </span>
+                  } @else if (project.status === 'not-git') {
+                    <span class="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-warning bg-warning-subtle px-1.5 py-0.5 rounded">
+                      <lucide-icon [img]="WarnIcon" [size]="10"></lucide-icon>
+                      Not a git repo
+                    </span>
+                  }
+                </div>
+                <div class="mt-0.5 truncate">
+                  <app-path-breadcrumbs [path]="project.localPath"></app-path-breadcrumbs>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="icon-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                aria-label="Remove project"
+                (click)="askRemove(project, $event)"
+              >
+                <lucide-icon [img]="TrashIcon" [size]="14"></lucide-icon>
+              </button>
+
+              <lucide-icon
+                [img]="ChevronIcon"
+                [size]="16"
+                class="text-content-disabled shrink-0"
+              ></lucide-icon>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  </main>
+</div>
+
+<app-clone-project-modal
+  [open]="isCloneModalOpen()"
+  (closed)="closeCloneModal()"
+  (cloned)="onProjectCloned($event)"
+></app-clone-project-modal>
+
+<app-confirmation-modal
+  [open]="removeTarget() !== null"
+  [config]="removeConfig()"
+  (confirmed)="confirmRemove()"
+  (cancelled)="cancelRemove()"
+></app-confirmation-modal>

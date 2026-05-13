@@ -1,0 +1,45 @@
+@if (open()) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] animate-in fade-in"
+    role="dialog"
+    aria-modal="true"
+    (click)="onBackdropClick()"
+  >
+    <div
+      class="bg-surface rounded-lg shadow-lg w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col border border-border"
+      [class]="sizeClasses[size()]"
+      (click)="$event.stopPropagation()"
+    >
+      @if (title() || closable()) {
+        <header class="flex items-start justify-between gap-4 px-5 pt-5 pb-3">
+          <div class="flex-1 min-w-0">
+            @if (title()) {
+              <h2 class="text-lg font-semibold text-content tracking-tight">
+                {{ title() }}
+              </h2>
+            }
+            @if (description()) {
+              <p class="text-sm text-content-muted mt-1">{{ description() }}</p>
+            }
+          </div>
+          @if (closable()) {
+            <button
+              type="button"
+              class="icon-btn -mt-1 -mr-1 shrink-0"
+              (click)="onClose()"
+              aria-label="Close"
+            >
+              <lucide-icon [img]="XIcon" [size]="16"></lucide-icon>
+            </button>
+          }
+        </header>
+      }
+
+      <div class="px-5 pb-5 overflow-y-auto">
+        <ng-content></ng-content>
+      </div>
+
+      <ng-content select="[modal-footer]"></ng-content>
+    </div>
+  </div>
+}

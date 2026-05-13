@@ -1,0 +1,110 @@
+<app-modal
+  [open]="open()"
+  title="New Environment"
+  description="Add a deployment target where your tests will run."
+  size="md"
+  (closed)="onCancel()"
+>
+  <form class="space-y-4" (ngSubmit)="onSubmit()">
+    <div>
+      <label class="label-base" for="env-name">Name</label>
+      <input
+        id="env-name"
+        type="text"
+        class="input-base"
+        placeholder="Development"
+        [value]="name()"
+        (input)="onNameChange($any($event.target).value)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+
+    <div>
+      <label class="label-base" for="env-url">Deployed URL</label>
+      <input
+        id="env-url"
+        type="url"
+        class="input-base"
+        placeholder="https://dev.example.com"
+        [value]="url()"
+        (input)="onUrlChange($any($event.target).value)"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <p class="text-xs text-content-subtle mt-1.5">
+        Tests will execute against this URL.
+      </p>
+    </div>
+
+    <div>
+      <label class="label-base flex items-center justify-between">
+        <span>Code branch</span>
+        @if (!branchLoading()) {
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 text-content-muted hover:text-content transition-colors font-normal"
+            (click)="refreshBranches()"
+            aria-label="Refresh branches"
+          >
+            <lucide-icon [img]="RefreshIcon" [size]="11"></lucide-icon>
+            <span>Refresh</span>
+          </button>
+        }
+      </label>
+
+      <app-searchable-dropdown
+        [items]="branchItems()"
+        [value]="branch()"
+        [loading]="branchLoading()"
+        [errorMessage]="branchError()"
+        [mono]="true"
+        placeholder="Select branch"
+        searchPlaceholder="Search branches…"
+        loadingMessage="Loading branches…"
+        emptyMessage="No matching branches"
+        (changed)="onBranchChange($event)"
+      ></app-searchable-dropdown>
+
+      @if (!branchError()) {
+        <p class="text-xs text-content-subtle mt-1.5">
+          AI will read code from this branch to generate tests.
+        </p>
+      }
+    </div>
+
+    <div>
+      <label class="label-base">Color</label>
+      <div class="flex gap-2">
+        @for (swatch of colorSwatches; track swatch.value) {
+          <button
+            type="button"
+            class="group flex flex-col items-center gap-1.5 flex-1 py-2 px-1 rounded border transition-colors"
+            [class.border-content]="color() === swatch.value"
+            [class.border-border]="color() !== swatch.value"
+            [class.bg-surface-muted]="color() === swatch.value"
+            (click)="selectColor(swatch.value)"
+          >
+            <span [class]="swatch.classes + ' h-3 w-3 rounded-full'" aria-hidden="true"></span>
+            <span class="text-xs text-content-muted">{{ swatch.label }}</span>
+          </button>
+        }
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-2 pt-2">
+      <app-button variant="secondary" (clicked)="onCancel()">
+        Cancel
+      </app-button>
+      <app-button
+        variant="primary"
+        type="submit"
+        [disabled]="!canSubmit()"
+        [loading]="isSubmitting()"
+        (clicked)="onSubmit()"
+      >
+        Create
+      </app-button>
+    </div>
+  </form>
+</app-modal>
