@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { firstValueFrom, Observable } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 
 export interface GithubUser {
   login: string;
@@ -76,10 +76,26 @@ export class GithubService {
     return all;
   }
 
-  listBranches(token: string, owner: string, repo: string): Observable<GithubBranch[]> {
-    return this.http.get<GithubBranch[]>(
-      `${this.baseUrl}/repos/${owner}/${repo}/branches?per_page=100`,
-      { headers: this.buildHeaders(token) },
-    );
+  async listBranches(
+    token: string,
+    owner: string,
+    repo: string,
+  ): Promise<GithubBranch[]> {
+    const all: GithubBranch[] = [];
+    let page = 1;
+    const perPage = 100;
+    while (true) {
+      const batch = await firstValueFrom(
+        this.http.get<GithubBranch[]>(
+          `${this.baseUrl}/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
+          { headers: this.buildHeaders(token) },
+        ),
+      );
+      all.push(...batch);
+      if (batch.length < perPage) break;
+      page++;
+      if (page > 20) break;
+    }
+    return all;
   }
 }

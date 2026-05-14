@@ -58,12 +58,20 @@ export interface EnvSyncResult {
   synced_at: string;
 }
 
+export interface TestCase {
+  kind: 'suite' | 'test';
+  title: string;
+  depth: number;
+  line: number;
+}
+
 export interface TestFile {
   path: string;
   name: string;
   relative_path: string;
   directory: string;
   size_bytes: number;
+  test_cases: TestCase[];
 }
 
 export interface ChatMessage {
@@ -78,6 +86,16 @@ export interface ChatEnvContext {
   worktreePath: string | null;
   projectType?: string | null;
   framework?: string | null;
+}
+
+export interface ChatResult {
+  reply: string;
+  session_id: string | null;
+}
+
+export interface ChatProgress {
+  request_id: string;
+  status: string;
 }
 
 export interface CypressStatus {
@@ -276,17 +294,21 @@ export class TauriBridgeService {
   }
 
   chatSend(
+    requestId: string,
     repoPath: string,
     envContext: ChatEnvContext | null,
     history: ChatMessage[],
     message: string,
-  ): Promise<string> {
+    sessionId: string | null,
+  ): Promise<ChatResult> {
     this.assertTauri('chat_send');
-    return invoke<string>('chat_send', {
+    return invoke<ChatResult>('chat_send', {
+      requestId,
       repoPath,
       envContext,
       history,
       message,
+      sessionId,
     });
   }
 

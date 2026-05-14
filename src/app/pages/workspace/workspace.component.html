@@ -255,44 +255,98 @@
                   }
                   @for (file of group.files; track file.path) {
                     @let status = testStatusFor(file);
-                    <div
-                      [class]="
-                        'group/file w-full flex items-center gap-1.5 pr-1 rounded-md transition-colors text-xs cursor-pointer ' +
-                        (selectedFile()?.path === file.path
-                          ? 'bg-brand-subtle text-content'
-                          : 'text-content-muted hover:bg-surface-muted hover:text-content')
-                      "
-                      role="button"
-                      tabindex="0"
-                      (click)="selectFile(file)"
-                      (keydown.enter)="selectFile(file)"
-                    >
-                      <div [class]="'flex items-center gap-2 flex-1 min-w-0 py-1.5 pl-2 ' + (group.directory ? 'pl-6' : '')">
-                        @switch (status) {
-                          @case ('running') {
-                            <lucide-icon [img]="LoaderIcon" [size]="11" class="shrink-0 text-content-muted animate-spin"></lucide-icon>
-                          }
-                          @case ('passed') {
-                            <lucide-icon [img]="CheckIcon" [size]="11" class="shrink-0 text-success"></lucide-icon>
-                          }
-                          @case ('failed') {
-                            <lucide-icon [img]="XIcon" [size]="11" class="shrink-0 text-danger"></lucide-icon>
-                          }
-                          @default {
-                            <lucide-icon [img]="FileIcon" [size]="11" class="shrink-0"></lucide-icon>
-                          }
-                        }
-                        <span class="truncate font-mono">{{ file.name }}</span>
-                      </div>
-                      <button
-                        type="button"
-                        class="inline-flex items-center justify-center h-6 w-6 rounded-md text-success hover:text-success hover:bg-success/10 opacity-60 group-hover/file:opacity-100 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                        [disabled]="isRunBusy()"
-                        (click)="runTest(file, $event)"
-                        title="Run test"
+                    @let expandable = file.test_cases.length > 0;
+                    <div>
+                      <!-- File row -->
+                      <div
+                        [class]="
+                          'group/file w-full flex items-center pr-1 rounded-md transition-colors text-xs cursor-pointer ' +
+                          (selectedFile()?.path === file.path
+                            ? 'bg-brand-subtle text-content'
+                            : 'text-content-muted hover:bg-surface-muted hover:text-content')
+                        "
+                        role="button"
+                        tabindex="0"
+                        (click)="onFileClick(file)"
+                        (keydown.enter)="onFileClick(file)"
                       >
-                        <lucide-icon [img]="PlayIcon" [size]="12"></lucide-icon>
-                      </button>
+                        @if (expandable) {
+                          <button
+                            type="button"
+                            class="h-7 w-5 inline-flex items-center justify-center text-content-disabled hover:text-content transition-colors shrink-0"
+                            [style.margin-left.px]="group.directory ? 16 : 0"
+                            (click)="toggleExpand(file, $event)"
+                            [title]="isExpanded(file) ? 'Collapse' : 'Expand'"
+                          >
+                            <lucide-icon
+                              [img]="isExpanded(file) ? ChevronDownIcon : ChevronRightIcon"
+                              [size]="12"
+                            ></lucide-icon>
+                          </button>
+                        } @else {
+                          <span
+                            class="shrink-0"
+                            [style.width.px]="group.directory ? 36 : 20"
+                          ></span>
+                        }
+
+                        <div class="flex items-center gap-2 flex-1 min-w-0 py-1.5">
+                          @switch (status) {
+                            @case ('running') {
+                              <lucide-icon [img]="LoaderIcon" [size]="11" class="shrink-0 text-content-muted animate-spin"></lucide-icon>
+                            }
+                            @case ('passed') {
+                              <lucide-icon [img]="CheckIcon" [size]="11" class="shrink-0 text-success"></lucide-icon>
+                            }
+                            @case ('failed') {
+                              <lucide-icon [img]="XIcon" [size]="11" class="shrink-0 text-danger"></lucide-icon>
+                            }
+                            @default {
+                              <lucide-icon [img]="FileIcon" [size]="11" class="shrink-0"></lucide-icon>
+                            }
+                          }
+                          <span class="truncate font-mono">{{ file.name }}</span>
+                          @if (expandable) {
+                            <span class="text-[10px] text-content-disabled shrink-0 tabular-nums">
+                              {{ file.test_cases.length }}
+                            </span>
+                          }
+                        </div>
+                        <button
+                          type="button"
+                          class="inline-flex items-center justify-center h-6 w-6 rounded-md text-success hover:text-success hover:bg-success/10 opacity-60 group-hover/file:opacity-100 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                          [disabled]="isRunBusy()"
+                          (click)="runTest(file, $event)"
+                          title="Run test"
+                        >
+                          <lucide-icon [img]="PlayIcon" [size]="12"></lucide-icon>
+                        </button>
+                      </div>
+
+                      <!-- Test-case tree (describe / it blocks) -->
+                      @if (expandable && isExpanded(file)) {
+                        <div class="pb-1">
+                          @for (tc of file.test_cases; track $index) {
+                            <div
+                              class="flex items-center gap-1.5 py-0.5 pr-2 rounded-md cursor-pointer transition-colors text-content-muted hover:bg-surface-muted hover:text-content"
+                              [style.padding-left.px]="testCaseIndent(!!group.directory, tc.depth)"
+                              role="button"
+                              tabindex="0"
+                              (click)="selectFile(file)"
+                              (keydown.enter)="selectFile(file)"
+                              [title]="tc.title"
+                            >
+                              @if (tc.kind === 'suite') {
+                                <span class="h-1.5 w-1.5 rounded-[2px] bg-content-subtle shrink-0"></span>
+                                <span class="truncate text-[11px] font-medium">{{ tc.title }}</span>
+                              } @else {
+                                <span class="h-1.5 w-1.5 rounded-full bg-content-disabled shrink-0"></span>
+                                <span class="truncate text-[11px]">{{ tc.title }}</span>
+                              }
+                            </div>
+                          }
+                        </div>
+                      }
                     </div>
                   }
                 </div>
@@ -405,10 +459,15 @@
                     <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
                   </div>
                   <div class="rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle">
-                    <div class="flex items-center gap-1.5">
-                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 0ms"></span>
-                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 150ms"></span>
-                      <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 300ms"></span>
+                    <div class="flex items-center gap-2">
+                      <div class="flex items-center gap-1.5 shrink-0">
+                        <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 0ms"></span>
+                        <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 150ms"></span>
+                        <span class="h-1.5 w-1.5 rounded-full bg-content-muted animate-bounce" style="animation-delay: 300ms"></span>
+                      </div>
+                      @if (chatStatus()) {
+                        <span class="text-xs text-content-muted truncate">{{ chatStatus() }}</span>
+                      }
                     </div>
                   </div>
                 </div>

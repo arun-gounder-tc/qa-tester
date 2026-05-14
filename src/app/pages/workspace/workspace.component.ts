@@ -26,6 +26,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   FileCode2,
   Folder,
@@ -47,6 +48,7 @@ import { UserMenuComponent } from '../../components/shared/user-menu/user-menu.c
 import { Environment } from '../../models/environment.model';
 import {
   ChatEnvContext,
+  ChatProgress,
   CypressChunk,
   CypressDone,
   ProjectTypeInfo,
@@ -113,6 +115,7 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly BackIcon = ArrowLeft;
   readonly LoaderIcon = LoaderCircle;
   readonly ChevronDownIcon = ChevronDown;
+  readonly ChevronRightIcon = ChevronRight;
   readonly FolderIcon = Folder;
   readonly FolderOpenIcon = FolderOpen;
   readonly FileIcon = FileCode2;
@@ -160,10 +163,14 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly isEnvMenuOpen = signal(false);
   readonly selectedFile = signal<TestFile | null>(null);
   readonly selectedFileContent = signal<string | null>(null);
+  // Paths of test files whose describe/it tree is expanded in the sidebar.
+  readonly expandedFiles = signal<Set<string>>(new Set());
 
   readonly chatAvailable = signal<boolean | null>(null);
   readonly projectInfo = signal<ProjectTypeInfo | null>(null);
   readonly isSending = signal(false);
+  // Live status of the in-flight Claude turn ("Reading login.cy.js", …).
+  readonly chatStatus = signal('');
   readonly draft = signal('');
 
   // Resizable panel widths (in px). Persisted to localStorage.
@@ -410,6 +417,37 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
     this.selectedFileContent.set(null);
   }
 
+  /// File-row click: open the preview and expand its test tree (if any).
+  onFileClick(file: TestFile): void {
+    void this.selectFile(file);
+    if (file.test_cases.length > 0 && !this.isExpanded(file)) {
+      this.toggleExpand(file);
+    }
+  }
+
+  toggleExpand(file: TestFile, event?: Event): void {
+    event?.stopPropagation();
+    this.expandedFiles.update((set) => {
+      const next = new Set(set);
+      if (next.has(file.path)) {
+        next.delete(file.path);
+      } else {
+        next.add(file.path);
+      }
+      return next;
+    });
+  }
+
+  isExpanded(file: TestFile): boolean {
+    return this.expandedFiles().has(file.path);
+  }
+
+  /// Left padding (px) for a test-case row, nested under its file + suites.
+  testCaseIndent(hasDirectory: boolean, depth: number): number {
+    const base = hasDirectory ? 44 : 28;
+    return base + depth * 14;
+  }
+
   async sendMessage(): Promise<void> {
     const text = this.draft().trim();
     if (!text || this.isSending()) return;
@@ -428,8 +466,19 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
     this.chat.append(projectId, envId, { role: 'user', content: text });
     this.draft.set('');
     this.isSending.set(true);
+    this.chatStatus.set('Sending…');
+
+    const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    let unsubProgress: (() => void) | null = null;
 
     try {
+      // Stream live progress ("Reading login.cy.js", …) into the UI so the
+      // tester sees what Claude is doing instead of a frozen spinner.
+      unsubProgress = await this.tauri.listen<ChatProgress>(
+        `chat-progress:${requestId}`,
+        (progress) => this.chatStatus.set(progress.status),
+      );
+
       const env = this.activeEnv();
       const info = this.projectInfo();
       const envContext: ChatEnvContext | null = env
@@ -442,15 +491,21 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
             framework: info?.framework ?? null,
           }
         : null;
-      const reply = await this.tauri.chatSend(
+      // Resume the existing Claude session if we have one — keeps context
+      // warm so follow-up messages don't re-read the whole codebase.
+      const sessionId = this.chat.sessionFor(projectId, envId);
+      const result = await this.tauri.chatSend(
+        requestId,
         p.localPath,
         envContext,
         history,
         text,
+        sessionId,
       );
+      this.chat.setSession(projectId, envId, result.session_id);
       this.chat.append(projectId, envId, {
         role: 'assistant',
-        content: reply,
+        content: result.reply,
       });
       // Claude may have created/edited test files. Refresh the list AND
       // the uncommitted-changes check so the commit banner shows up.
@@ -463,7 +518,9 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
         content: `(error) ${this.formatError(err)}`,
       });
     } finally {
+      if (unsubProgress) unsubProgress();
       this.isSending.set(false);
+      this.chatStatus.set('');
       // Refocus input so user can type the next message immediately.
       queueMicrotask(() => this.chatInput?.nativeElement.focus());
     }

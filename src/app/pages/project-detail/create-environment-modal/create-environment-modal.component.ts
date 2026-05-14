@@ -9,7 +9,6 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
 import { LucideAngularModule, RefreshCw } from 'lucide-angular';
 import { ButtonComponent } from '../../../components/shared/button/button.component';
 import { ModalComponent } from '../../../components/shared/modal/modal.component';
@@ -126,8 +125,10 @@ export class CreateEnvironmentModalComponent {
     this.branchesState.set({ kind: 'loading' });
 
     try {
-      const list = await firstValueFrom(
-        this.github.listBranches(token, parsed.owner, parsed.repo),
+      const list = await this.github.listBranches(
+        token,
+        parsed.owner,
+        parsed.repo,
       );
       const items: DropdownItem[] = list
         .filter((b) => b.name !== 'tests')
