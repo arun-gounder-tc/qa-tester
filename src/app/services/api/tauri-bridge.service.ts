@@ -312,6 +312,14 @@ export class TauriBridgeService {
     });
   }
 
+  /// Cancels an in-flight chat turn. The corresponding `chatSend` promise
+  /// rejects with the cancel sentinel error string so the caller can show
+  /// a graceful "stopped" state instead of an error toast.
+  chatCancel(requestId: string): Promise<void> {
+    this.assertTauri('chat_cancel');
+    return invoke<void>('chat_cancel', { requestId });
+  }
+
   // Cypress
   cypressCheck(repoPath: string): Promise<CypressStatus> {
     this.assertTauri('cypress_check');

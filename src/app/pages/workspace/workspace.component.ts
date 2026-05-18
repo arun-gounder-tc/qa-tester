@@ -39,6 +39,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Square,
   Terminal,
   TestTube2,
   Trash2,
@@ -124,6 +125,7 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly ChatIcon = MessageSquare;
   readonly SearchIcon = Search;
   readonly SendIcon = Send;
+  readonly StopIcon = Square;
   readonly TrashIcon = Trash2;
   readonly PlayIcon = Play;
   readonly TerminalIcon = Terminal;
@@ -171,6 +173,9 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly isSending = signal(false);
   // Live status of the in-flight Claude turn ("Reading login.cy.js", …).
   readonly chatStatus = signal('');
+  // Request id of the in-flight chat turn — used by the Stop button +
+  // Escape-key handler to cancel via `chat_cancel`.
+  readonly currentRequestId = signal<string | null>(null);
   readonly draft = signal('');
 
   // Resizable panel widths (in px). Persisted to localStorage.
@@ -469,6 +474,7 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
     this.chatStatus.set('Sending…');
 
     const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.currentRequestId.set(requestId);
     let unsubProgress: (() => void) | null = null;
 
     try {
@@ -512,21 +518,54 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
       void this.loadTestFiles();
       void this.refreshUncommittedTests();
     } catch (err) {
-      this.notify.error(this.formatError(err));
-      this.chat.append(projectId, envId, {
-        role: 'assistant',
-        content: `(error) ${this.formatError(err)}`,
-      });
+      const msg = this.formatError(err);
+      // Stop button / Escape — show a quiet "(stopped)" placeholder so the
+      // user can see where the turn ended without an error toast.
+      if (this.isCancelError(msg)) {
+        this.chat.append(projectId, envId, {
+          role: 'assistant',
+          content: '(stopped)',
+        });
+      } else {
+        this.notify.error(msg);
+        this.chat.append(projectId, envId, {
+          role: 'assistant',
+          content: `(error) ${msg}`,
+        });
+      }
     } finally {
       if (unsubProgress) unsubProgress();
       this.isSending.set(false);
       this.chatStatus.set('');
+      this.currentRequestId.set(null);
       // Refocus input so user can type the next message immediately.
       queueMicrotask(() => this.chatInput?.nativeElement.focus());
     }
   }
 
+  /// Stops the in-flight chat turn (Stop button + Escape key). No-op if
+  /// nothing is running.
+  cancelChat(): void {
+    const id = this.currentRequestId();
+    if (!id) return;
+    this.chatStatus.set('Stopping…');
+    void this.tauri.chatCancel(id).catch(() => {
+      // Cancel is best-effort — if it errors, the chat_send promise will
+      // resolve normally and we'll just ignore the late reply.
+    });
+  }
+
+  private isCancelError(message: string): boolean {
+    return message.includes('__chat_cancelled__');
+  }
+
   onChatKeydown(event: KeyboardEvent): void {
+    // Escape stops an in-flight turn — same UX as Claude's terminal client.
+    if (event.key === 'Escape' && this.isSending()) {
+      event.preventDefault();
+      this.cancelChat();
+      return;
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       void this.sendMessage();
@@ -900,6 +939,14 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
     const target = event.target as Node;
     if (this.envMenu && !this.envMenu.nativeElement.contains(target)) {
       this.isEnvMenuOpen.set(false);
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  onDocumentEscape(): void {
+    // Global Escape — stop the in-flight chat from anywhere in the workspace.
+    if (this.isSending()) {
+      this.cancelChat();
     }
   }
 

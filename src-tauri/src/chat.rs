@@ -1,7 +1,32 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::Emitter;
+
+/// Sentinel error string for a chat turn the user cancelled. Used to keep
+/// the cancel path out of the normal error UI (no toast, no "(error) …"
+/// reply — just a graceful stop).
+const CANCEL_SENTINEL: &str = "__chat_cancelled__";
+
+/// Tracks one in-flight chat request so `chat_cancel` can kill it.
+struct CancelToken {
+    /// Set to `true` by `chat_cancel`. Read at safe checkpoints so we
+    /// never silently retry / fall back after the user pressed Stop.
+    cancelled: AtomicBool,
+    /// Handle to the running `claude` child process. Held in an Option
+    /// because the child only exists between spawn and wait.
+    child: Mutex<Option<Child>>,
+}
+
+/// Global request_id → CancelToken registry. Populated by `chat_send`
+/// for the duration of one turn, looked up by `chat_cancel`.
+fn cancel_registry() -> &'static Mutex<HashMap<String, Arc<CancelToken>>> {
+    static REG: OnceLock<Mutex<HashMap<String, Arc<CancelToken>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
@@ -73,7 +98,20 @@ pub async fn chat_send(
     message: String,
     session_id: Option<String>,
 ) -> Result<ChatResult, String> {
-    tokio::task::spawn_blocking(move || -> Result<ChatResult, String> {
+    // Register a cancel token so `chat_cancel` can find and kill this turn.
+    let token = Arc::new(CancelToken {
+        cancelled: AtomicBool::new(false),
+        child: Mutex::new(None),
+    });
+    cancel_registry()
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), token.clone());
+
+    let request_id_for_cleanup = request_id.clone();
+    let token_for_task = token.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<ChatResult, String> {
         // First attempt: resume the existing session if we have one,
         // otherwise start fresh with the full context.
         let first_prompt = match &session_id {
@@ -87,7 +125,15 @@ pub async fn chat_send(
             &repo_path,
             &first_prompt,
             session_id.as_deref(),
+            &token_for_task,
         );
+
+        // If the user cancelled, never silently fall back — return the
+        // cancel sentinel so the frontend can show a graceful "stopped"
+        // message instead of a confusing reconnect.
+        if token_for_task.cancelled.load(Ordering::SeqCst) {
+            return Err(CANCEL_SENTINEL.to_string());
+        }
 
         match attempt {
             Ok(result) => Ok(result),
@@ -98,15 +144,54 @@ pub async fn chat_send(
                     emit_progress(&app, &request_id, "Reconnecting…");
                     let fresh =
                         build_initial_prompt(env_context.as_ref(), &history, &message);
-                    run_claude(&app, &request_id, &repo_path, &fresh, None)
+                    let retry = run_claude(
+                        &app,
+                        &request_id,
+                        &repo_path,
+                        &fresh,
+                        None,
+                        &token_for_task,
+                    );
+                    if token_for_task.cancelled.load(Ordering::SeqCst) {
+                        return Err(CANCEL_SENTINEL.to_string());
+                    }
+                    retry
                 } else {
                     Err(err)
                 }
             }
         }
     })
-    .await
-    .map_err(|e| format!("Task error: {}", e))?
+    .await;
+
+    // Always clean up the registry entry — even on panics / cancel.
+    cancel_registry()
+        .lock()
+        .unwrap()
+        .remove(&request_id_for_cleanup);
+
+    result.map_err(|e| format!("Task error: {}", e))?
+}
+
+/// Cancels an in-flight `chat_send` by request id. Sets the cancel flag
+/// (so the task won't fall back to a fresh attempt) and kills the running
+/// `claude` child process (so the reader loop wakes up immediately).
+#[tauri::command]
+pub fn chat_cancel(request_id: String) -> Result<(), String> {
+    let token = cancel_registry()
+        .lock()
+        .unwrap()
+        .get(&request_id)
+        .cloned();
+    if let Some(t) = token {
+        t.cancelled.store(true, Ordering::SeqCst);
+        if let Ok(mut slot) = t.child.lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Spawns `claude -p` in stream-json mode, relays progress events to the
@@ -126,7 +211,13 @@ fn run_claude(
     repo_path: &str,
     prompt: &str,
     resume_session: Option<&str>,
+    token: &Arc<CancelToken>,
 ) -> Result<ChatResult, String> {
+    // Bail before spawning if the user already pressed Stop.
+    if token.cancelled.load(Ordering::SeqCst) {
+        return Err(CANCEL_SENTINEL.to_string());
+    }
+
     let mut cmd = Command::new("claude");
     cmd.arg("-p")
         .arg("--output-format")
@@ -162,6 +253,15 @@ fn run_claude(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
+    // Hand the child to the cancel token so `chat_cancel` can kill it.
+    // If the user cancelled between spawn and registration, kill now.
+    *token.child.lock().unwrap() = Some(child);
+    if token.cancelled.load(Ordering::SeqCst) {
+        if let Some(c) = token.child.lock().unwrap().as_mut() {
+            let _ = c.kill();
+        }
+    }
+
     // Drain stderr on a side thread so a chatty stream can't deadlock us.
     let stderr_handle = std::thread::spawn(move || {
         let mut buf = String::new();
@@ -185,8 +285,21 @@ fn run_claude(
         }
     }
 
+    // Take the child back so we can wait on it (also frees the slot so a
+    // later `chat_cancel` no-ops cleanly instead of poking a dead handle).
+    let mut child = token
+        .child
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("Child handle missing")?;
     let status = child.wait().map_err(|e| format!("Wait failed: {}", e))?;
     let stderr_text = stderr_handle.join().unwrap_or_default();
+
+    // Cancel beats any error from the killed process.
+    if token.cancelled.load(Ordering::SeqCst) {
+        return Err(CANCEL_SENTINEL.to_string());
+    }
 
     if !status.success() {
         let detail: String = stderr_text.trim().chars().take(500).collect();
@@ -322,21 +435,29 @@ fn build_initial_prompt(
         if let Some(wt) = &env.worktree_path {
             s.push_str(&format!("Source code location: {}\n", wt));
             s.push('\n');
+            // Strict tool-use gating. The first message of a thread already
+            // includes the full env context above — Claude does NOT need to
+            // explore the codebase to orient itself. Only touch files when
+            // the tester's request literally requires a new technical
+            // detail. This keeps simple chats (greetings, explanations,
+            // status questions) fast — no file reads, no extra latency.
             s.push_str(
-                "IMPORTANT: When the tester asks about selectors, components, page \
-                routes, form fields, or any UI detail you don't already know, READ \
-                files from the source code location above using your Read/Glob/Grep \
-                tools. Look for `data-testid`, `id`, `name`, role attributes, form \
-                labels, route definitions, etc. Do NOT ask the tester for technical \
-                details — they don't know them.\n",
-            );
-            s.push('\n');
-            s.push_str(
-                "SPEED: This is a continuing conversation — you keep full context \
-                between messages. Only read a file when you actually need a detail \
-                you don't have yet; if you already read it earlier in this \
-                conversation, reuse what you learned. For simple questions, answer \
-                directly without exploring the codebase. Keep replies fast.\n",
+                "TOOL USE RULES (read carefully):\n\
+                1. DEFAULT = no tools. Reply from what you already know and \
+                from the context above. Do not run Read / Glob / Grep \
+                speculatively to \"orient yourself\" — you are already \
+                oriented.\n\
+                2. Use Read / Glob / Grep ONLY when the tester's message \
+                literally requires a UI detail you do not have (e.g. \"write \
+                a test that logs in\" → you may need to find the login form's \
+                selectors). Greetings, small talk, conceptual questions, \
+                \"what tests exist\", \"explain X\" — answer directly, no \
+                file reads.\n\
+                3. Never ask the tester for technical details — they don't \
+                know selectors / routes / component names. When you genuinely \
+                need them, read the source yourself.\n\
+                4. Within one conversation, reuse what you read earlier; \
+                never re-read the same file.\n",
             );
             s.push('\n');
             s.push_str(&format!(

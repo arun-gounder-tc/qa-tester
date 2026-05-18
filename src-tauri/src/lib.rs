@@ -44,6 +44,7 @@ pub fn run() {
       tests_files::read_test_file,
       chat::chat_available,
       chat::chat_send,
+      chat::chat_cancel,
       cypress::cypress_check,
       cypress::cypress_install,
       cypress::cypress_run,

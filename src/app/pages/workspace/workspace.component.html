@@ -481,26 +481,41 @@
           <div class="max-w-3xl mx-auto flex items-end gap-2">
             <textarea
               #chatInput
-              class="flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-disabled focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand min-h-[40px] max-h-[160px]"
+              class="flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-disabled focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand min-h-[40px] max-h-[160px] disabled:opacity-60"
               rows="1"
-              placeholder="Describe the test you want to create…"
+              [placeholder]="isSending() ? 'Press Esc to stop…' : 'Describe the test you want to create…'"
               [ngModel]="draft()"
               (ngModelChange)="draft.set($event)"
               (keydown)="onChatKeydown($event)"
-              [disabled]="isSending()"
+              [readonly]="isSending()"
             ></textarea>
-            <button
-              type="button"
-              class="inline-flex items-center justify-center h-10 w-10 rounded-md bg-content text-content-inverse hover:bg-content/90 disabled:bg-surface-muted disabled:text-content-disabled disabled:cursor-not-allowed transition-colors shrink-0"
-              (click)="sendMessage()"
-              [disabled]="isSending() || !draft().trim()"
-              title="Send (Enter)"
-            >
-              <lucide-icon [img]="SendIcon" [size]="14"></lucide-icon>
-            </button>
+            @if (isSending()) {
+              <button
+                type="button"
+                class="inline-flex items-center justify-center h-10 w-10 rounded-md bg-danger text-white hover:bg-danger/90 transition-colors shrink-0"
+                (click)="cancelChat()"
+                title="Stop (Esc)"
+              >
+                <lucide-icon [img]="StopIcon" [size]="12" class="fill-current"></lucide-icon>
+              </button>
+            } @else {
+              <button
+                type="button"
+                class="inline-flex items-center justify-center h-10 w-10 rounded-md bg-content text-content-inverse hover:bg-content/90 disabled:bg-surface-muted disabled:text-content-disabled disabled:cursor-not-allowed transition-colors shrink-0"
+                (click)="sendMessage()"
+                [disabled]="!draft().trim()"
+                title="Send (Enter)"
+              >
+                <lucide-icon [img]="SendIcon" [size]="14"></lucide-icon>
+              </button>
+            }
           </div>
           <p class="max-w-3xl mx-auto text-xs text-content-disabled mt-1.5">
-            Enter to send · Shift+Enter for newline
+            @if (isSending()) {
+              Press Esc or click Stop to cancel
+            } @else {
+              Enter to send · Shift+Enter for newline
+            }
           </p>
         </div>
       }
