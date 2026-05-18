@@ -98,6 +98,19 @@ export interface ChatProgress {
   status: string;
 }
 
+export interface AuthStatus {
+  cli_missing: boolean;
+  logged_in: boolean;
+  email: string | null;
+  auth_method: string | null;
+  subscription_type: string | null;
+}
+
+export interface LoginLine {
+  request_id: string;
+  line: string;
+}
+
 export interface CypressStatus {
   installed: boolean;
   node_modules_exists: boolean;
@@ -291,6 +304,34 @@ export class TauriBridgeService {
   chatAvailable(): Promise<boolean> {
     if (!this.isTauri) return Promise.resolve(false);
     return invoke<boolean>('chat_available');
+  }
+
+  chatAuthStatus(): Promise<AuthStatus> {
+    if (!this.isTauri) {
+      return Promise.resolve({
+        cli_missing: true,
+        logged_in: false,
+        email: null,
+        auth_method: null,
+        subscription_type: null,
+      });
+    }
+    return invoke<AuthStatus>('chat_auth_status');
+  }
+
+  chatLoginStart(requestId: string, useConsole = false): Promise<boolean> {
+    this.assertTauri('chat_login_start');
+    return invoke<boolean>('chat_login_start', { requestId, useConsole });
+  }
+
+  chatLoginCancel(requestId: string): Promise<void> {
+    this.assertTauri('chat_login_cancel');
+    return invoke<void>('chat_login_cancel', { requestId });
+  }
+
+  chatLogout(): Promise<void> {
+    this.assertTauri('chat_logout');
+    return invoke<void>('chat_logout');
   }
 
   chatSend(

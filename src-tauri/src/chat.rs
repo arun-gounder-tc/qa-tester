@@ -86,6 +86,223 @@ pub fn chat_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Auth status returned to the UI. `cli_missing` means the binary isn't on
+/// PATH — show the install Claude Code prompt. Otherwise the UI reads
+/// `logged_in` to decide between login button vs. the chat composer.
+#[derive(Serialize, Default)]
+pub struct AuthStatus {
+    pub cli_missing: bool,
+    pub logged_in: bool,
+    pub email: Option<String>,
+    pub auth_method: Option<String>,
+    pub subscription_type: Option<String>,
+}
+
+/// Runs `claude auth status --json` and parses the result. The CLI exits
+/// non-zero when not logged in but still prints valid JSON, so we read
+/// stdout regardless of exit code.
+#[tauri::command]
+pub fn chat_auth_status() -> AuthStatus {
+    let mut status = AuthStatus::default();
+
+    let output = Command::new("claude")
+        .arg("auth")
+        .arg("status")
+        .arg("--json")
+        .stdin(Stdio::null())
+        .output();
+
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                status.cli_missing = true;
+            }
+            return status;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout.trim()) {
+        status.logged_in = value["loggedIn"].as_bool().unwrap_or(false);
+        status.email = value["email"].as_str().map(|s| s.to_string());
+        status.auth_method = value["authMethod"].as_str().map(|s| s.to_string());
+        status.subscription_type = value["subscriptionType"].as_str().map(|s| s.to_string());
+    }
+    status
+}
+
+/// Tracks one in-flight login attempt so the UI can cancel it (user closed
+/// the modal without finishing the OAuth flow in the browser).
+struct LoginToken {
+    cancelled: AtomicBool,
+    child: Mutex<Option<Child>>,
+}
+
+fn login_registry() -> &'static Mutex<HashMap<String, Arc<LoginToken>>> {
+    static REG: OnceLock<Mutex<HashMap<String, Arc<LoginToken>>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Spawns `claude auth login`. The CLI opens the user's default browser to
+/// the Anthropic OAuth page and runs a localhost callback server itself —
+/// we just wait for the process to exit. Output is streamed to the UI as
+/// `claude-login:<request_id>` events so the user sees what's happening.
+/// Returns true when login succeeded (process exit 0 + auth status confirms).
+#[tauri::command]
+pub async fn chat_login_start(
+    app: tauri::AppHandle,
+    request_id: String,
+    use_console: bool,
+) -> Result<bool, String> {
+    let token = Arc::new(LoginToken {
+        cancelled: AtomicBool::new(false),
+        child: Mutex::new(None),
+    });
+    login_registry()
+        .lock()
+        .unwrap()
+        .insert(request_id.clone(), token.clone());
+
+    let request_id_for_cleanup = request_id.clone();
+    let token_for_task = token.clone();
+
+    let result = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        let mut cmd = Command::new("claude");
+        cmd.arg("auth").arg("login");
+        if use_console {
+            cmd.arg("--console");
+        } else {
+            cmd.arg("--claudeai");
+        }
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "Claude CLI not found. Install Claude Code first.".to_string()
+            } else {
+                format!("Failed to start login: {}", e)
+            }
+        })?;
+
+        let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+        *token_for_task.child.lock().unwrap() = Some(child);
+        if token_for_task.cancelled.load(Ordering::SeqCst) {
+            if let Some(c) = token_for_task.child.lock().unwrap().as_mut() {
+                let _ = c.kill();
+            }
+        }
+
+        // Stream stderr on a side thread (claude prints the auth URL to stderr).
+        let app_for_stderr = app.clone();
+        let request_id_for_stderr = request_id.clone();
+        let stderr_handle = std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                emit_login_line(&app_for_stderr, &request_id_for_stderr, &line);
+            }
+        });
+
+        // Main thread reads stdout.
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            emit_login_line(&app, &request_id, &line);
+        }
+
+        let _ = stderr_handle.join();
+
+        let mut child = token_for_task
+            .child
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or("Login child missing")?;
+        let status = child.wait().map_err(|e| format!("Wait failed: {}", e))?;
+
+        if token_for_task.cancelled.load(Ordering::SeqCst) {
+            return Err("__login_cancelled__".to_string());
+        }
+
+        if !status.success() {
+            return Err(format!(
+                "Login exited with code {}",
+                status.code().unwrap_or(-1)
+            ));
+        }
+
+        // Confirm with a fresh status check — login could succeed silently
+        // and we want a single source of truth.
+        let confirm = chat_auth_status();
+        Ok(confirm.logged_in)
+    })
+    .await;
+
+    login_registry()
+        .lock()
+        .unwrap()
+        .remove(&request_id_for_cleanup);
+
+    match result {
+        Ok(r) => r,
+        Err(e) => Err(format!("Task error: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub fn chat_login_cancel(request_id: String) -> Result<(), String> {
+    let token = login_registry().lock().unwrap().get(&request_id).cloned();
+    if let Some(t) = token {
+        t.cancelled.store(true, Ordering::SeqCst);
+        if let Ok(mut slot) = t.child.lock() {
+            if let Some(child) = slot.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn chat_logout() -> Result<(), String> {
+    let status = Command::new("claude")
+        .arg("auth")
+        .arg("logout")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to logout: {}", e))?;
+    if !status.status.success() {
+        let detail = String::from_utf8_lossy(&status.stderr);
+        return Err(format!("Logout failed: {}", detail.trim()));
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Clone)]
+struct LoginLine {
+    request_id: String,
+    line: String,
+}
+
+fn emit_login_line(app: &tauri::AppHandle, request_id: &str, line: &str) {
+    let trimmed = line.trim_end();
+    if trimmed.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        &format!("claude-login:{}", request_id),
+        LoginLine {
+            request_id: request_id.to_string(),
+            line: trimmed.to_string(),
+        },
+    );
+}
+
 /// Sends a user message to Claude and returns the assistant reply + session
 /// id. When `session_id` is provided the existing Claude session is resumed
 /// (fast — context already loaded); otherwise a fresh session is started

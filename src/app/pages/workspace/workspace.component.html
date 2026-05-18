@@ -372,7 +372,14 @@
       (dragleave)="onChatDragLeave($event)"
       (drop)="onChatDrop($event)"
     >
-      @if (chatAvailable() === false) {
+      @if (!authReady()) {
+        <div class="flex-1 flex items-center justify-center">
+          <div class="inline-flex items-center gap-2 text-xs text-content-muted">
+            <lucide-icon [img]="LoaderIcon" [size]="12" class="animate-spin"></lucide-icon>
+            Checking Claude…
+          </div>
+        </div>
+      } @else if (authCliMissing()) {
         <div class="flex-1 flex flex-col items-center justify-center px-8 text-center">
           <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface-muted text-content-muted mb-4">
             <lucide-icon [img]="ChatIcon" [size]="22"></lucide-icon>
@@ -384,30 +391,150 @@
             Install Claude Code and make sure the <code class="font-mono text-content">claude</code> command works in your terminal, then reopen this workspace.
           </p>
         </div>
-      } @else {
-        <div class="border-b border-border bg-surface px-4 h-11 flex items-center justify-between shrink-0">
-          <div class="flex items-center gap-2">
-            <lucide-icon [img]="SparklesIcon" [size]="13" class="text-brand"></lucide-icon>
-            <span class="text-sm font-medium text-content">Claude</span>
+      } @else if (!authLoggedIn()) {
+        <div class="flex-1 flex flex-col items-center justify-center px-8 text-center">
+          <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-brand-subtle text-brand mb-4">
+            <app-claude-logo [size]="22"></app-claude-logo>
           </div>
-          @if (hasMessages()) {
+          <h3 class="text-base font-semibold text-content tracking-tight">
+            Sign in to Claude
+          </h3>
+          <p class="text-sm text-content-muted mt-1.5 max-w-md leading-relaxed">
+            Sign in so Claude can write your tests. Your browser will open — once you finish the sign-in, this view will refresh automatically.
+          </p>
+          <div class="mt-5 flex flex-col gap-2 items-center">
             <button
               type="button"
-              class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
-              (click)="clearChat()"
-              title="Clear chat"
+              class="inline-flex items-center gap-2 h-10 px-5 rounded-md bg-content text-content-inverse hover:bg-content/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+              [disabled]="isLoggingIn()"
+              (click)="startLogin(false)"
             >
-              <lucide-icon [img]="TrashIcon" [size]="11"></lucide-icon>
-              Clear
+              @if (isLoggingIn()) {
+                <lucide-icon [img]="LoaderIcon" [size]="13" class="animate-spin"></lucide-icon>
+                Waiting for browser…
+              } @else {
+                <lucide-icon [img]="LoginIcon" [size]="13"></lucide-icon>
+                Sign in with Claude
+              }
             </button>
-          }
+            @if (!isLoggingIn()) {
+              <button
+                type="button"
+                class="text-xs text-content-muted hover:text-content underline"
+                (click)="startLogin(true)"
+              >
+                Use Anthropic Console (API billing) instead
+              </button>
+            }
+          </div>
+        </div>
+
+        @if (isLoggingIn() || loginError() || loginStatusLines().length > 0) {
+          <div
+            class="fixed inset-0 bg-black/40 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
+            (click)="!isLoggingIn() && dismissLoginError()"
+          >
+            <div
+              class="bg-surface border border-border rounded-xl shadow-soft max-w-md w-full overflow-hidden animate-fade-in-scale"
+              (click)="$event.stopPropagation()"
+            >
+              <div class="p-5">
+                <div class="flex items-center gap-3 mb-3">
+                  <div class="h-9 w-9 rounded-full bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
+                    @if (isLoggingIn()) {
+                      <lucide-icon [img]="LoaderIcon" [size]="16" class="animate-spin"></lucide-icon>
+                    } @else if (loginError()) {
+                      <lucide-icon [img]="XIcon" [size]="16" class="text-danger"></lucide-icon>
+                    } @else {
+                      <lucide-icon [img]="CheckIcon" [size]="16" class="text-success"></lucide-icon>
+                    }
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <h3 class="text-sm font-semibold text-content tracking-tight">
+                      @if (isLoggingIn()) {
+                        Signing in to Claude
+                      } @else if (loginError()) {
+                        Sign-in failed
+                      } @else {
+                        Signed in
+                      }
+                    </h3>
+                    <p class="text-xs text-content-muted">
+                      @if (isLoggingIn()) {
+                        Complete the sign-in in your browser
+                      } @else if (loginError()) {
+                        {{ loginError() }}
+                      }
+                    </p>
+                  </div>
+                </div>
+                @if (loginStatusLines().length > 0) {
+                  <pre class="mt-2 max-h-40 overflow-auto text-[11px] font-mono bg-surface-muted rounded p-2 text-content-muted whitespace-pre-wrap break-words">{{ loginStatusLines().join('\n') }}</pre>
+                }
+              </div>
+              <div class="border-t border-border-subtle px-5 py-3 flex items-center justify-end gap-2 bg-surface-subtle">
+                @if (isLoggingIn()) {
+                  <button
+                    type="button"
+                    class="inline-flex items-center h-8 px-3 rounded-md text-xs font-medium text-content-muted hover:text-content hover:bg-surface transition-colors"
+                    (click)="cancelLogin()"
+                  >
+                    Cancel
+                  </button>
+                } @else {
+                  <button
+                    type="button"
+                    class="inline-flex items-center h-8 px-4 rounded-md text-xs font-medium bg-content text-content-inverse hover:bg-content/90 transition-colors"
+                    (click)="dismissLoginError()"
+                  >
+                    Close
+                  </button>
+                }
+              </div>
+            </div>
+          </div>
+        }
+      } @else {
+        <div class="border-b border-border bg-surface px-4 h-11 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <app-claude-logo [size]="13" class="text-brand"></app-claude-logo>
+            <span class="text-sm font-medium text-content">Claude</span>
+            @if (authStatus()?.email) {
+              <span class="text-content-disabled">·</span>
+              <span class="text-xs text-content-muted truncate" [title]="authStatus()!.email!">
+                {{ authStatus()!.email }}
+              </span>
+            }
+          </div>
+          <div class="flex items-center gap-1">
+            @if (hasMessages()) {
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-content-muted hover:text-content hover:bg-surface-muted transition-colors"
+                (click)="clearChat()"
+                title="Clear chat"
+              >
+                <lucide-icon [img]="TrashIcon" [size]="11"></lucide-icon>
+                Clear
+              </button>
+            }
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 h-6 px-2 rounded-md text-xs text-danger hover:bg-danger/10 transition-colors"
+              (click)="logout()"
+              title="Sign out of Claude"
+            >
+              <lucide-icon [img]="LogoutIcon" [size]="11"></lucide-icon>
+              Sign out
+            </button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto px-4 py-4 min-h-0">
           @if (!hasMessages() && !isSending()) {
             <div class="h-full flex flex-col items-center justify-center text-center px-4">
               <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-brand-subtle text-brand mb-4">
-                <lucide-icon [img]="SparklesIcon" [size]="22"></lucide-icon>
+                <app-claude-logo [size]="22"></app-claude-logo>
               </div>
               <h3 class="text-base font-semibold text-content tracking-tight">
                 Hi! What test do you want to create?
@@ -452,7 +579,7 @@
                   @let choices = choicesFor(msg.content);
                   <div class="flex gap-2.5">
                     <div class="h-7 w-7 rounded-md bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
-                      <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
+                      <app-claude-logo [size]="13"></app-claude-logo>
                     </div>
                     <div class="max-w-[80%] flex flex-col gap-2 min-w-0">
                       <div class="rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle text-sm leading-relaxed whitespace-pre-wrap break-words text-content">
@@ -479,7 +606,7 @@
               @if (isSending()) {
                 <div class="flex gap-2.5">
                   <div class="h-7 w-7 rounded-md bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
-                    <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
+                    <app-claude-logo [size]="13"></app-claude-logo>
                   </div>
                   <div class="rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle">
                     <div class="flex items-center gap-2">

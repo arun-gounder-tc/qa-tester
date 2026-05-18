@@ -32,6 +32,8 @@ import {
   Folder,
   FolderOpen,
   LoaderCircle,
+  LogIn,
+  LogOut,
   LucideAngularModule,
   MessageSquare,
   Paperclip,
@@ -40,20 +42,22 @@ import {
   X,
   Search,
   Send,
-  Sparkles,
   Square,
   Terminal,
   TestTube2,
   Trash2,
   XCircle,
 } from 'lucide-angular';
+import { ClaudeLogoComponent } from '../../components/shared/claude-logo/claude-logo.component';
 import { UserMenuComponent } from '../../components/shared/user-menu/user-menu.component';
 import { Environment } from '../../models/environment.model';
 import {
+  AuthStatus,
   ChatEnvContext,
   ChatProgress,
   CypressChunk,
   CypressDone,
+  LoginLine,
   ProjectTypeInfo,
   TauriBridgeService,
   TestFile,
@@ -113,7 +117,7 @@ const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 @Component({
   selector: 'app-workspace',
   standalone: true,
-  imports: [FormsModule, LucideAngularModule, UserMenuComponent],
+  imports: [ClaudeLogoComponent, FormsModule, LucideAngularModule, UserMenuComponent],
   templateUrl: './workspace.component.html',
   styleUrl: './workspace.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -137,13 +141,14 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly FolderOpenIcon = FolderOpen;
   readonly FileIcon = FileCode2;
   readonly PlusIcon = Plus;
-  readonly SparklesIcon = Sparkles;
   readonly ChatIcon = MessageSquare;
   readonly SearchIcon = Search;
   readonly SendIcon = Send;
   readonly StopIcon = Square;
   readonly PaperclipIcon = Paperclip;
   readonly CloseIcon = X;
+  readonly LoginIcon = LogIn;
+  readonly LogoutIcon = LogOut;
   readonly TrashIcon = Trash2;
   readonly PlayIcon = Play;
   readonly TerminalIcon = Terminal;
@@ -188,6 +193,19 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly expandedFiles = signal<Set<string>>(new Set());
 
   readonly chatAvailable = signal<boolean | null>(null);
+  readonly authStatus = signal<AuthStatus | null>(null);
+  readonly authChecking = signal(false);
+
+  readonly authLoggedIn = computed(() => this.authStatus()?.logged_in === true);
+  readonly authCliMissing = computed(() => this.authStatus()?.cli_missing === true);
+  readonly authReady = computed(() => this.authStatus() !== null);
+
+  readonly isLoggingIn = signal(false);
+  readonly loginStatusLines = signal<string[]>([]);
+  readonly loginError = signal<string | null>(null);
+  private loginRequestId: string | null = null;
+  private loginUnsub: (() => void) | null = null;
+
   readonly projectInfo = signal<ProjectTypeInfo | null>(null);
   readonly isSending = signal(false);
   // Live status of the in-flight Claude turn ("Reading login.cy.js", …).
@@ -300,8 +318,9 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
       }
     });
 
-    // Check whether Claude CLI is reachable so we can show the right UI.
-    void this.tauri.chatAvailable().then((ok) => this.chatAvailable.set(ok));
+    // Check CLI availability + auth state in one shot so the UI can choose
+    // between install prompt / login button / chat composer.
+    void this.refreshAuthStatus();
 
     // Detect project type once per project so we can pass it as context.
     effect(() => {
@@ -588,6 +607,96 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
 
   private isCancelError(message: string): boolean {
     return message.includes('__chat_cancelled__');
+  }
+
+  async refreshAuthStatus(): Promise<void> {
+    this.authChecking.set(true);
+    try {
+      const status = await this.tauri.chatAuthStatus();
+      this.authStatus.set(status);
+      this.chatAvailable.set(!status.cli_missing);
+    } catch {
+      this.authStatus.set({
+        cli_missing: true,
+        logged_in: false,
+        email: null,
+        auth_method: null,
+        subscription_type: null,
+      });
+      this.chatAvailable.set(false);
+    } finally {
+      this.authChecking.set(false);
+    }
+  }
+
+  async startLogin(useConsole = false): Promise<void> {
+    if (this.isLoggingIn()) return;
+    if (!this.tauri.isTauri) {
+      this.notify.error('Sign-in requires the desktop app.');
+      return;
+    }
+    const requestId = `login-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    this.loginRequestId = requestId;
+    this.loginStatusLines.set(['Opening your browser — complete the sign-in there.']);
+    this.loginError.set(null);
+    this.isLoggingIn.set(true);
+
+    try {
+      // Tee CLI output into the modal so the user sees the auth URL or any
+      // prompts the CLI prints while it waits for the browser callback.
+      this.loginUnsub = await this.tauri.listen<LoginLine>(
+        `claude-login:${requestId}`,
+        (event) => {
+          this.loginStatusLines.update((lines) => [...lines, event.line]);
+        },
+      );
+
+      const ok = await this.tauri.chatLoginStart(requestId, useConsole);
+      if (ok) {
+        this.loginStatusLines.update((lines) => [...lines, '✓ Signed in successfully']);
+        await this.refreshAuthStatus();
+        this.notify.success(
+          this.authStatus()?.email
+            ? `Signed in as ${this.authStatus()!.email}`
+            : 'Signed in to Claude',
+        );
+      } else {
+        this.loginError.set('Sign-in did not complete. Try again.');
+      }
+    } catch (err) {
+      const msg = this.formatError(err);
+      if (msg.includes('__login_cancelled__')) {
+        this.loginStatusLines.update((lines) => [...lines, '(cancelled)']);
+      } else {
+        this.loginError.set(msg);
+      }
+    } finally {
+      if (this.loginUnsub) this.loginUnsub();
+      this.loginUnsub = null;
+      this.loginRequestId = null;
+      this.isLoggingIn.set(false);
+    }
+  }
+
+  cancelLogin(): void {
+    const id = this.loginRequestId;
+    if (!id) return;
+    void this.tauri.chatLoginCancel(id).catch(() => undefined);
+  }
+
+  dismissLoginError(): void {
+    this.loginError.set(null);
+    this.loginStatusLines.set([]);
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.tauri.chatLogout();
+      await this.refreshAuthStatus();
+      this.notify.success('Signed out');
+    } catch (err) {
+      this.notify.error(this.formatError(err));
+    }
   }
 
   openFilePicker(): void {
