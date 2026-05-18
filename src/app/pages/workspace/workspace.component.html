@@ -365,7 +365,13 @@
     ></div>
 
     <!-- Middle: AI chat -->
-    <section class="flex-1 flex flex-col min-w-0 min-h-0 bg-surface-subtle">
+    <section
+      class="relative flex-1 flex flex-col min-w-0 min-h-0 bg-surface-subtle"
+      (dragenter)="onChatDragEnter($event)"
+      (dragover)="onChatDragOver($event)"
+      (dragleave)="onChatDragLeave($event)"
+      (drop)="onChatDrop($event)"
+    >
       @if (chatAvailable() === false) {
         <div class="flex-1 flex flex-col items-center justify-center px-8 text-center">
           <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface-muted text-content-muted mb-4">
@@ -443,12 +449,29 @@
                     </div>
                   </div>
                 } @else {
+                  @let choices = choicesFor(msg.content);
                   <div class="flex gap-2.5">
                     <div class="h-7 w-7 rounded-md bg-brand-subtle text-brand inline-flex items-center justify-center shrink-0">
                       <lucide-icon [img]="SparklesIcon" [size]="13"></lucide-icon>
                     </div>
-                    <div class="max-w-[80%] rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle text-sm leading-relaxed whitespace-pre-wrap break-words text-content">
-                      {{ msg.content }}
+                    <div class="max-w-[80%] flex flex-col gap-2 min-w-0">
+                      <div class="rounded-lg px-3.5 py-2.5 bg-surface border border-border-subtle text-sm leading-relaxed whitespace-pre-wrap break-words text-content">
+                        {{ visibleContent(msg.content) }}
+                      </div>
+                      @if (choices.length > 0 && isLatestAssistant($index)) {
+                        <div class="flex flex-wrap gap-1.5">
+                          @for (choice of choices; track $index) {
+                            <button
+                              type="button"
+                              class="inline-flex items-center h-8 px-3 rounded-md text-xs font-medium border border-border bg-surface text-content hover:border-brand hover:bg-brand-subtle hover:text-brand transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              [disabled]="isSending()"
+                              (click)="pickChoice(choice)"
+                            >
+                              {{ choice }}
+                            </button>
+                          }
+                        </div>
+                      }
                     </div>
                   </div>
                 }
@@ -478,7 +501,46 @@
         </div>
 
         <div class="border-t border-border bg-surface px-4 py-3 shrink-0">
+          @if (attachments().length > 0) {
+            <div class="max-w-3xl mx-auto mb-2 flex flex-wrap gap-1.5">
+              @for (file of attachments(); track file.id) {
+                <div
+                  class="inline-flex items-center gap-1.5 h-7 pl-2 pr-1 rounded-md border border-border bg-surface-subtle text-xs text-content max-w-[240px]"
+                  [title]="file.name + ' · ' + formatBytes(file.size)"
+                >
+                  <lucide-icon [img]="PaperclipIcon" [size]="11" class="text-content-muted shrink-0"></lucide-icon>
+                  <span class="truncate font-mono">{{ file.name }}</span>
+                  <span class="text-content-disabled shrink-0">{{ formatBytes(file.size) }}</span>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center h-5 w-5 rounded text-content-muted hover:text-content hover:bg-surface-muted transition-colors shrink-0"
+                    (click)="removeAttachment(file.id)"
+                    [disabled]="isSending()"
+                    title="Remove"
+                  >
+                    <lucide-icon [img]="CloseIcon" [size]="11"></lucide-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          }
+          <input
+            #fileInput
+            type="file"
+            multiple
+            class="hidden"
+            (change)="onFileInputChange($event)"
+          />
           <div class="max-w-3xl mx-auto flex items-end gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center justify-center h-10 w-10 rounded-md border border-border bg-surface text-content-muted hover:text-content hover:bg-surface-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+              (click)="openFilePicker()"
+              [disabled]="isSending()"
+              title="Attach files"
+            >
+              <lucide-icon [img]="PaperclipIcon" [size]="14"></lucide-icon>
+            </button>
             <textarea
               #chatInput
               class="flex-1 resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-content-disabled focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand min-h-[40px] max-h-[160px] disabled:opacity-60"
@@ -503,7 +565,7 @@
                 type="button"
                 class="inline-flex items-center justify-center h-10 w-10 rounded-md bg-content text-content-inverse hover:bg-content/90 disabled:bg-surface-muted disabled:text-content-disabled disabled:cursor-not-allowed transition-colors shrink-0"
                 (click)="sendMessage()"
-                [disabled]="!draft().trim()"
+                [disabled]="!draft().trim() && attachments().length === 0"
                 title="Send (Enter)"
               >
                 <lucide-icon [img]="SendIcon" [size]="14"></lucide-icon>
@@ -517,6 +579,16 @@
               Enter to send · Shift+Enter for newline
             }
           </p>
+        </div>
+      }
+
+      @if (isDraggingOver()) {
+        <div class="absolute inset-2 z-20 rounded-lg border-2 border-dashed border-brand bg-brand-subtle/80 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-none">
+          <div class="inline-flex items-center justify-center h-12 w-12 rounded-lg bg-surface text-brand mb-3 shadow-soft">
+            <lucide-icon [img]="PaperclipIcon" [size]="22"></lucide-icon>
+          </div>
+          <p class="text-base font-semibold text-content tracking-tight">Drop files to attach</p>
+          <p class="text-xs text-content-muted mt-1">Files are saved to the workspace and read directly by Claude.</p>
         </div>
       }
     </section>

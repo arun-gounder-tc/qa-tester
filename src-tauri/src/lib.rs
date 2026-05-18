@@ -45,6 +45,7 @@ pub fn run() {
       chat::chat_available,
       chat::chat_send,
       chat::chat_cancel,
+      chat::save_attachment,
       cypress::cypress_check,
       cypress::cypress_install,
       cypress::cypress_run,

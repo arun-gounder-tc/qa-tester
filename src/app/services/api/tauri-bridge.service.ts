@@ -300,6 +300,7 @@ export class TauriBridgeService {
     history: ChatMessage[],
     message: string,
     sessionId: string | null,
+    attachmentPaths: string[] = [],
   ): Promise<ChatResult> {
     this.assertTauri('chat_send');
     return invoke<ChatResult>('chat_send', {
@@ -309,6 +310,20 @@ export class TauriBridgeService {
       history,
       message,
       sessionId,
+      attachmentPaths,
+    });
+  }
+
+  /// Saves a dropped/picked file under `<repo>/.qa-tester/attachments/` and
+  /// returns its absolute path. The frontend then passes that path to
+  /// `chat_send` so Claude can Read the actual file (images, PDFs, etc.)
+  /// instead of seeing only the filename.
+  saveAttachment(repoPath: string, name: string, bytes: Uint8Array): Promise<string> {
+    this.assertTauri('save_attachment');
+    return invoke<string>('save_attachment', {
+      repoPath,
+      name,
+      bytes: Array.from(bytes),
     });
   }
 

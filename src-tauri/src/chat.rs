@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
 /// Sentinel error string for a chat turn the user cancelled. Used to keep
@@ -97,7 +100,9 @@ pub async fn chat_send(
     history: Vec<ChatMessage>,
     message: String,
     session_id: Option<String>,
+    attachment_paths: Option<Vec<String>>,
 ) -> Result<ChatResult, String> {
+    let attachments = attachment_paths.unwrap_or_default();
     // Register a cancel token so `chat_cancel` can find and kill this turn.
     let token = Arc::new(CancelToken {
         cancelled: AtomicBool::new(false),
@@ -115,8 +120,8 @@ pub async fn chat_send(
         // First attempt: resume the existing session if we have one,
         // otherwise start fresh with the full context.
         let first_prompt = match &session_id {
-            Some(_) => build_resume_prompt(&message),
-            None => build_initial_prompt(env_context.as_ref(), &history, &message),
+            Some(_) => build_resume_prompt(&message, &attachments),
+            None => build_initial_prompt(env_context.as_ref(), &history, &message, &attachments),
         };
 
         let attempt = run_claude(
@@ -143,7 +148,7 @@ pub async fn chat_send(
                 if session_id.is_some() {
                     emit_progress(&app, &request_id, "Reconnecting…");
                     let fresh =
-                        build_initial_prompt(env_context.as_ref(), &history, &message);
+                        build_initial_prompt(env_context.as_ref(), &history, &message, &attachments);
                     let retry = run_claude(
                         &app,
                         &request_id,
@@ -418,8 +423,12 @@ fn build_initial_prompt(
     env: Option<&EnvContext>,
     history: &[ChatMessage],
     new_message: &str,
+    attachments: &[String],
 ) -> String {
     let mut s = String::new();
+
+    s.push_str(&choices_instruction());
+    s.push('\n');
 
     if let Some(env) = env {
         s.push_str("=== Active workspace context ===\n");
@@ -484,17 +493,114 @@ fn build_initial_prompt(
 
     s.push_str("=== New tester message ===\n");
     s.push_str(new_message);
+    s.push_str(&format_attachments_block(attachments));
     s.push_str("\n\nRespond to the latest tester message. Follow the conventions in CLAUDE.md.");
     s
 }
 
 /// Prompt for a resumed session — Claude already holds the workspace
 /// context and every prior turn, so we only send the new message.
-fn build_resume_prompt(new_message: &str) -> String {
-    format!(
-        "{}\n\n(Continuing our conversation — you still have the workspace context \
+fn build_resume_prompt(new_message: &str, attachments: &[String]) -> String {
+    let mut s = String::new();
+    s.push_str(new_message);
+    s.push_str(&format_attachments_block(attachments));
+    s.push_str(
+        "\n\n(Continuing our conversation — you still have the workspace context \
         and everything you read earlier. Reuse what you already know; only read \
         files if you genuinely need a new detail. Follow CLAUDE.md conventions.)",
-        new_message
+    );
+    s.push_str(&format!("\n\n{}", choices_instruction()));
+    s
+}
+
+/// Appends an "Attached files" block telling Claude exactly where each
+/// dropped file lives so it can Read them directly without asking the user.
+fn format_attachments_block(attachments: &[String]) -> String {
+    if attachments.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("\n\n=== Attached files (the tester uploaded these via the chat UI) ===\n");
+    for path in attachments {
+        s.push_str(&format!("- {}\n", path));
+    }
+    s.push_str(
+        "\nThese files are inside the workspace, so use the Read tool on the absolute path above \
+        to inspect them. Image / PDF / binary files: read them with the Read tool too — it handles \
+        non-text content. Do NOT ask the tester for permission or for the file again; you already \
+        have access.",
+    );
+    s
+}
+
+/// System instruction telling Claude how to ask multiple-choice questions
+/// so the frontend can render them as clickable buttons.
+fn choices_instruction() -> String {
+    String::from(
+        "=== Chat UI capabilities ===\n\
+        When you need the tester to pick from a small set of options (e.g. \"Which login form \
+        should I target?\"), end your reply with a <choices> block listing the options. The UI \
+        will render each <option> as a clickable button and send the tester's pick back as their \
+        next message verbatim. Format strictly:\n\n\
+        <choices>\n  <option>First choice text</option>\n  <option>Second choice text</option>\n</choices>\n\n\
+        Rules: 2–5 options max, each option a short complete phrase the tester can act on, \
+        no markdown / numbering / bullets inside <option>. Only use this when a discrete choice \
+        is needed — never for open-ended questions or confirmations like \"shall I proceed?\".",
     )
+}
+
+/// Saves an uploaded file from the chat UI to `<repo>/.qa-tester/attachments/`
+/// and returns its absolute path. The directory lives inside the repo so
+/// Claude's normal workspace permissions cover it — no `--add-dir` needed.
+/// Filenames are prefixed with an epoch-ms stamp to avoid collisions when the
+/// user attaches two files with the same name.
+#[tauri::command]
+pub fn save_attachment(
+    repo_path: String,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let safe_name = sanitize_filename(&name);
+    if safe_name.is_empty() {
+        return Err("Empty filename".to_string());
+    }
+
+    let dir = PathBuf::from(&repo_path)
+        .join(".qa-tester")
+        .join("attachments");
+    fs::create_dir_all(&dir).map_err(|e| format!("Failed to create attachment dir: {}", e))?;
+
+    // Ensure .gitignore so attachments don't accidentally get committed.
+    let gitignore = PathBuf::from(&repo_path).join(".qa-tester").join(".gitignore");
+    if !gitignore.exists() {
+        let _ = fs::write(&gitignore, "# QA Tester local cache — do not commit\n*\n");
+    }
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let final_name = format!("{}-{}", stamp, safe_name);
+    let final_path = dir.join(&final_name);
+
+    fs::write(&final_path, &bytes).map_err(|e| format!("Failed to write attachment: {}", e))?;
+
+    Ok(final_path.to_string_lossy().into_owned())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    // Strip any path separators / weird chars so the filename can't escape
+    // the attachments dir. Keep dots, dashes, underscores, alphanumerics.
+    let base = Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    base.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }

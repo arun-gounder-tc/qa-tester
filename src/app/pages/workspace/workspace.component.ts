@@ -34,8 +34,10 @@ import {
   LoaderCircle,
   LucideAngularModule,
   MessageSquare,
+  Paperclip,
   Play,
   Plus,
+  X,
   Search,
   Send,
   Sparkles,
@@ -94,6 +96,20 @@ interface RunResult {
   durationMs: number;
 }
 
+interface ChatAttachment {
+  id: string;
+  name: string;
+  size: number;
+  // Absolute path on disk where the file was saved. Claude reads it directly
+  // via its Read tool, so the file lives inside the repo's .qa-tester/
+  // attachments dir and is covered by Claude's workspace permissions.
+  path: string;
+}
+
+// 25 MB cap — Tauri's JSON IPC is slow for huge byte arrays; bigger than
+// this and we'd want a streaming approach.
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
 @Component({
   selector: 'app-workspace',
   standalone: true,
@@ -126,6 +142,8 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   readonly SearchIcon = Search;
   readonly SendIcon = Send;
   readonly StopIcon = Square;
+  readonly PaperclipIcon = Paperclip;
+  readonly CloseIcon = X;
   readonly TrashIcon = Trash2;
   readonly PlayIcon = Play;
   readonly TerminalIcon = Terminal;
@@ -141,6 +159,7 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   @ViewChild('messagesEnd') messagesEnd?: ElementRef<HTMLElement>;
   @ViewChild('chatInput') chatInput?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('outputBox') outputBox?: ElementRef<HTMLElement>;
+  @ViewChild('fileInput') fileInput?: ElementRef<HTMLInputElement>;
 
   readonly project = computed(() => {
     const projectId = this.id();
@@ -177,6 +196,11 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
   // Escape-key handler to cancel via `chat_cancel`.
   readonly currentRequestId = signal<string | null>(null);
   readonly draft = signal('');
+  readonly attachments = signal<ChatAttachment[]>([]);
+  // True while the user is dragging files over the chat panel — drives the
+  // overlay visibility.
+  readonly isDraggingOver = signal(false);
+  private dragDepth = 0;
 
   // Resizable panel widths (in px). Persisted to localStorage.
   readonly leftWidth = signal(this.loadWidth('qa-tester:workspace-left-width', 288, 200, 480));
@@ -455,7 +479,8 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
 
   async sendMessage(): Promise<void> {
     const text = this.draft().trim();
-    if (!text || this.isSending()) return;
+    const files = this.attachments();
+    if ((!text && files.length === 0) || this.isSending()) return;
     const p = this.project();
     if (!p) return;
 
@@ -468,8 +493,13 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
     const envId = this.envId();
     const history = this.messages();
 
-    this.chat.append(projectId, envId, { role: 'user', content: text });
+    const displayText = this.formatMessageForDisplay(text, files);
+    const promptText = text.length > 0 ? text : '(See attached files.)';
+    const attachmentPaths = files.map((f) => f.path);
+
+    this.chat.append(projectId, envId, { role: 'user', content: displayText });
     this.draft.set('');
+    this.attachments.set([]);
     this.isSending.set(true);
     this.chatStatus.set('Sending…');
 
@@ -505,8 +535,9 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
         p.localPath,
         envContext,
         history,
-        text,
+        promptText,
         sessionId,
+        attachmentPaths,
       );
       this.chat.setSession(projectId, envId, result.session_id);
       this.chat.append(projectId, envId, {
@@ -557,6 +588,155 @@ export class WorkspaceComponent implements AfterViewChecked, OnDestroy {
 
   private isCancelError(message: string): boolean {
     return message.includes('__chat_cancelled__');
+  }
+
+  openFilePicker(): void {
+    if (this.isSending()) return;
+    this.fileInput?.nativeElement.click();
+  }
+
+  onFileInputChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    if (files && files.length > 0) {
+      void this.addFiles(Array.from(files));
+    }
+    // Reset so the same file can be re-picked after removal.
+    input.value = '';
+  }
+
+  removeAttachment(id: string): void {
+    this.attachments.update((list) => list.filter((a) => a.id !== id));
+  }
+
+  onChatDragEnter(event: DragEvent): void {
+    if (!this.hasFilesInDrag(event)) return;
+    event.preventDefault();
+    this.dragDepth += 1;
+    this.isDraggingOver.set(true);
+  }
+
+  onChatDragOver(event: DragEvent): void {
+    if (!this.hasFilesInDrag(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  onChatDragLeave(event: DragEvent): void {
+    if (!this.hasFilesInDrag(event)) return;
+    event.preventDefault();
+    this.dragDepth = Math.max(0, this.dragDepth - 1);
+    if (this.dragDepth === 0) {
+      this.isDraggingOver.set(false);
+    }
+  }
+
+  onChatDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.dragDepth = 0;
+    this.isDraggingOver.set(false);
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      void this.addFiles(Array.from(files));
+    }
+  }
+
+  private hasFilesInDrag(event: DragEvent): boolean {
+    const types = event.dataTransfer?.types;
+    if (!types) return false;
+    for (let i = 0; i < types.length; i += 1) {
+      if (types[i] === 'Files') return true;
+    }
+    return false;
+  }
+
+  private async addFiles(files: File[]): Promise<void> {
+    const project = this.project();
+    if (!project) return;
+    if (!this.tauri.isTauri) {
+      this.notify.error('File attachments require the desktop app.');
+      return;
+    }
+    const next: ChatAttachment[] = [];
+    for (const file of files) {
+      if (file.size > ATTACHMENT_MAX_BYTES) {
+        this.notify.error(
+          `${file.name} is ${this.formatBytes(file.size)} — over the 25 MB attachment limit.`,
+        );
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        const path = await this.tauri.saveAttachment(
+          project.localPath,
+          file.name,
+          new Uint8Array(buffer),
+        );
+        next.push({
+          id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name,
+          size: file.size,
+          path,
+        });
+      } catch (err) {
+        this.notify.error(`Could not save ${file.name}: ${this.formatError(err)}`);
+      }
+    }
+    if (next.length === 0) return;
+    this.attachments.update((list) => [...list, ...next]);
+  }
+
+  private formatMessageForDisplay(text: string, files: ChatAttachment[]): string {
+    if (files.length === 0) return text;
+    const names = files.map((f) => `📎 ${f.name}`).join('\n');
+    return text.length > 0 ? `${text}\n\n${names}` : names;
+  }
+
+  formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  /// Strips the trailing `<choices>…</choices>` block from an assistant
+  /// message before rendering it as plain text.
+  visibleContent(content: string): string {
+    return content.replace(/<choices>[\s\S]*?<\/choices>\s*$/i, '').trim();
+  }
+
+  /// Extracts choice labels from a `<choices><option>…</option></choices>`
+  /// trailer. Returns an empty array when no choices are present, so the
+  /// template can simply `@if (choices.length)`.
+  choicesFor(content: string): string[] {
+    const block = content.match(/<choices>([\s\S]*?)<\/choices>\s*$/i);
+    if (!block) return [];
+    const options: string[] = [];
+    const optionRe = /<option>([\s\S]*?)<\/option>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = optionRe.exec(block[1])) !== null) {
+      const text = m[1].trim();
+      if (text.length > 0) options.push(text);
+    }
+    return options;
+  }
+
+  /// True only for the LATEST assistant message — earlier choices are stale
+  /// (the user already moved past them) and shouldn't show clickable buttons.
+  isLatestAssistant(index: number): boolean {
+    const msgs = this.messages();
+    if (msgs[index].role !== 'assistant') return false;
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      if (msgs[i].role === 'assistant') return i === index;
+    }
+    return false;
+  }
+
+  pickChoice(choice: string): void {
+    if (this.isSending()) return;
+    this.draft.set(choice);
+    void this.sendMessage();
   }
 
   onChatKeydown(event: KeyboardEvent): void {
